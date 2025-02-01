@@ -1,8 +1,8 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+using System;
 using osu.Framework.Allocation;
-using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Shapes;
@@ -11,17 +11,27 @@ using osu.Game.Graphics;
 using osu.Game.Graphics.Containers;
 using osu.Game.Graphics.Sprites;
 using osu.Game.Graphics.UserInterface;
+using osu.Game.Overlays;
+using osu.Game.Resources.Localisation.Web;
 using osuTK;
 
 namespace osu.Game.Collections
 {
-    public class ManageCollectionsDialog : OsuFocusedOverlayContainer
+    public partial class ManageCollectionsDialog : OsuFocusedOverlayContainer
     {
         private const double enter_duration = 500;
         private const double exit_duration = 200;
 
-        [Resolved(CanBeNull = true)]
-        private CollectionManager collectionManager { get; set; }
+        protected override string PopInSampleName => @"UI/overlay-big-pop-in";
+        protected override string PopOutSampleName => @"UI/overlay-big-pop-out";
+
+        private IDisposable? duckOperation;
+
+        private BasicSearchTextBox searchTextBox = null!;
+        private DrawableCollectionList list = null!;
+
+        [Resolved]
+        private MusicController? musicController { get; set; }
 
         public ManageCollectionsDialog()
         {
@@ -42,7 +52,7 @@ namespace osu.Game.Collections
             {
                 new Box
                 {
-                    Colour = colours.GreySeafoamDark,
+                    Colour = colours.GreySeaFoamDark,
                     RelativeSizeAxes = Axes.Both,
                 },
                 new Container
@@ -78,7 +88,7 @@ namespace osu.Game.Collections
                                             Anchor = Anchor.CentreRight,
                                             Origin = Anchor.CentreRight,
                                             Icon = FontAwesome.Solid.Times,
-                                            Colour = colours.GreySeafoamDarker,
+                                            Colour = colours.GreySeaFoamDarker,
                                             Scale = new Vector2(0.8f),
                                             X = -10,
                                             Action = () => State.Value = Visibility.Hidden
@@ -96,13 +106,33 @@ namespace osu.Game.Collections
                                         new Box
                                         {
                                             RelativeSizeAxes = Axes.Both,
-                                            Colour = colours.GreySeafoamDarker
+                                            Colour = colours.GreySeaFoamDarker
                                         },
-                                        new DrawableCollectionList
+                                        new Container
                                         {
                                             RelativeSizeAxes = Axes.Both,
-                                            Items = { BindTarget = collectionManager?.Collections ?? new BindableList<BeatmapCollection>() }
-                                        }
+                                            Padding = new MarginPadding(10),
+                                            Children = new Drawable[]
+                                            {
+                                                searchTextBox = new BasicSearchTextBox
+                                                {
+                                                    RelativeSizeAxes = Axes.X,
+                                                    Y = 10,
+                                                    Height = 40,
+                                                    ReleaseFocusOnCommit = false,
+                                                    HoldFocus = true,
+                                                    PlaceholderText = HomeStrings.SearchPlaceholder,
+                                                },
+                                                list = new DrawableCollectionList
+                                                {
+                                                    Padding = new MarginPadding
+                                                    {
+                                                        Top = 60,
+                                                    },
+                                                    RelativeSizeAxes = Axes.Both,
+                                                }
+                                            }
+                                        },
                                     }
                                 }
                             },
@@ -112,9 +142,30 @@ namespace osu.Game.Collections
             };
         }
 
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            searchTextBox.Current.BindValueChanged(_ =>
+            {
+                list.SearchTerm = searchTextBox.Current.Value;
+            });
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            duckOperation?.Dispose();
+        }
+
         protected override void PopIn()
         {
-            base.PopIn();
+            duckOperation = musicController?.Duck(new DuckParameters
+            {
+                DuckVolumeTo = 1,
+                DuckDuration = 100,
+                RestoreDuration = 100,
+            });
 
             this.FadeIn(enter_duration, Easing.OutQuint);
             this.ScaleTo(0.9f).Then().ScaleTo(1f, enter_duration, Easing.OutQuint);
@@ -124,11 +175,13 @@ namespace osu.Game.Collections
         {
             base.PopOut();
 
+            duckOperation?.Dispose();
+
             this.FadeOut(exit_duration, Easing.OutQuint);
             this.ScaleTo(0.9f, exit_duration);
 
             // Ensure that textboxes commit
-            GetContainingInputManager()?.TriggerFocusContention(this);
+            GetContainingFocusManager()?.TriggerFocusContention(this);
         }
     }
 }

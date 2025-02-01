@@ -7,21 +7,21 @@ using osu.Framework.Graphics.Containers;
 using osu.Framework.Input.Bindings;
 using osu.Framework.Input.Events;
 using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
 using osu.Game.Graphics.Sprites;
 using osu.Game.Graphics.UserInterface;
 using osu.Game.Input.Bindings;
 using osu.Game.Online.Rooms;
 using osuTK;
-using osuTK.Graphics;
 
 namespace osu.Game.Screens.OnlinePlay.Match.Components
 {
-    public abstract class RoomSettingsOverlay : FocusedOverlayContainer, IKeyBindingHandler<GlobalAction>
+    public abstract partial class RoomSettingsOverlay : FocusedOverlayContainer, IKeyBindingHandler<GlobalAction>
     {
         protected const float TRANSITION_DURATION = 350;
         protected const float FIELD_PADDING = 25;
 
-        protected OnlinePlayComposite Settings { get; set; }
+        protected Drawable Settings { get; set; } = null!;
 
         protected override bool BlockScrollInput => false;
 
@@ -48,24 +48,25 @@ namespace osu.Game.Screens.OnlinePlay.Match.Components
 
         protected abstract void SelectBeatmap();
 
-        protected abstract OnlinePlayComposite CreateSettings(Room room);
+        protected abstract Drawable CreateSettings(Room room);
 
         protected override void PopIn()
         {
-            base.PopIn();
             Settings.MoveToY(0, TRANSITION_DURATION, Easing.OutQuint);
             Settings.FadeIn(TRANSITION_DURATION / 2);
         }
 
         protected override void PopOut()
         {
-            base.PopOut();
             Settings.MoveToY(-1, TRANSITION_DURATION, Easing.InSine);
             Settings.Delay(TRANSITION_DURATION / 2).FadeOut(TRANSITION_DURATION / 2);
         }
 
         public bool OnPressed(KeyBindingPressEvent<GlobalAction> e)
         {
+            if (e.Repeat)
+                return false;
+
             switch (e.Action)
             {
                 case GlobalAction.Select:
@@ -91,32 +92,12 @@ namespace osu.Game.Screens.OnlinePlay.Match.Components
         {
         }
 
-        protected class SettingsTextBox : OsuTextBox
-        {
-            [BackgroundDependencyLoader]
-            private void load()
-            {
-                BackgroundUnfocused = Color4.Black;
-                BackgroundFocused = Color4.Black;
-            }
-        }
-
-        protected class SettingsNumberTextBox : SettingsTextBox
-        {
-            protected override bool CanAddCharacter(char character) => char.IsNumber(character);
-        }
-
-        protected class SettingsPasswordTextBox : OsuPasswordTextBox
-        {
-            [BackgroundDependencyLoader]
-            private void load()
-            {
-                BackgroundUnfocused = Color4.Black;
-                BackgroundFocused = Color4.Black;
-            }
-        }
-
-        protected class SectionContainer : FillFlowContainer<Section>
+        /// <remarks>
+        /// <see cref="ReverseChildIDFillFlowContainer{T}"/> is used to ensure that if the nested <see cref="Section"/>s
+        /// use expanded overhanging content (like an <see cref="OsuDropdown{T}"/>'s dropdown),
+        /// then the overhanging content will be correctly Z-ordered.
+        /// </remarks>
+        protected partial class SectionContainer : ReverseChildIDFillFlowContainer<Section>
         {
             public SectionContainer()
             {
@@ -128,9 +109,9 @@ namespace osu.Game.Screens.OnlinePlay.Match.Components
             }
         }
 
-        protected class Section : Container
+        protected partial class Section : Container
         {
-            private readonly Container content;
+            private readonly ReverseChildIDFillFlowContainer<Drawable> content;
 
             protected override Container<Drawable> Content => content;
 
@@ -150,12 +131,13 @@ namespace osu.Game.Screens.OnlinePlay.Match.Components
                         new OsuSpriteText
                         {
                             Font = OsuFont.GetFont(weight: FontWeight.Bold, size: 12),
-                            Text = title.ToUpper(),
+                            Text = title.ToUpperInvariant(),
                         },
-                        content = new Container
+                        content = new ReverseChildIDFillFlowContainer<Drawable>
                         {
                             AutoSizeAxes = Axes.Y,
                             RelativeSizeAxes = Axes.X,
+                            Direction = FillDirection.Vertical
                         },
                     },
                 };

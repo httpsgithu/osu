@@ -25,6 +25,16 @@ namespace osu.Game.Localisation
         public static LocalisableString VolumeHeader => new TranslatableString(getKey(@"volume_header"), @"Volume");
 
         /// <summary>
+        /// "Output device"
+        /// </summary>
+        public static LocalisableString OutputDevice => new TranslatableString(getKey(@"output_device"), @"Output device");
+
+        /// <summary>
+        /// "Hitsound stereo separation"
+        /// </summary>
+        public static LocalisableString PositionalLevel => new TranslatableString(getKey(@"positional_hitsound_audio_level"), @"Hitsound stereo separation");
+
+        /// <summary>
         /// "Master"
         /// </summary>
         public static LocalisableString MasterVolume => new TranslatableString(getKey(@"master_volume"), @"Master");
@@ -55,10 +65,25 @@ namespace osu.Game.Localisation
         public static LocalisableString AudioOffset => new TranslatableString(getKey(@"audio_offset"), @"Audio offset");
 
         /// <summary>
+        /// "Play a few beatmaps to receive a suggested offset!"
+        /// </summary>
+        public static LocalisableString SuggestedOffsetNote => new TranslatableString(getKey(@"suggested_offset_note"), @"Play a few beatmaps to receive a suggested offset!");
+
+        /// <summary>
+        /// "Based on the last {0} play(s), the suggested offset is {1} ms."
+        /// </summary>
+        public static LocalisableString SuggestedOffsetValueReceived(int plays, LocalisableString value) => new TranslatableString(getKey(@"suggested_offset_value_received"), @"Based on the last {0} play(s), the suggested offset is {1} ms.", plays, value);
+
+        /// <summary>
+        /// "Apply suggested offset"
+        /// </summary>
+        public static LocalisableString ApplySuggestedOffset => new TranslatableString(getKey(@"apply_suggested_offset"), @"Apply suggested offset");
+
+        /// <summary>
         /// "Offset wizard"
         /// </summary>
         public static LocalisableString OffsetWizard => new TranslatableString(getKey(@"offset_wizard"), @"Offset wizard");
 
-        private static string getKey(string key) => $"{prefix}:{key}";
+        private static string getKey(string key) => $@"{prefix}:{key}";
     }
 }

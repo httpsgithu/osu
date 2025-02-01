@@ -6,13 +6,12 @@ using osu.Framework.Bindables;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.Localisation;
 using osu.Game.Resources.Localisation.Web;
-using osu.Game.Users;
 
 namespace osu.Game.Overlays.Profile.Header.Components
 {
-    public class MappingSubscribersButton : ProfileHeaderStatisticsButton
+    public partial class MappingSubscribersButton : ProfileHeaderStatisticsButton
     {
-        public readonly Bindable<User> User = new Bindable<User>();
+        public readonly Bindable<UserProfileData?> User = new Bindable<UserProfileData?>();
 
         public override LocalisableString TooltipText => FollowsStrings.MappingFollowers;
 
@@ -21,7 +20,7 @@ namespace osu.Game.Overlays.Profile.Header.Components
         [BackgroundDependencyLoader]
         private void load()
         {
-            User.BindValueChanged(user => SetValue(user.NewValue?.MappingFollowerCount ?? 0), true);
+            User.BindValueChanged(user => SetValue(user.NewValue?.User.MappingFollowerCount ?? 0), true);
         }
     }
 }

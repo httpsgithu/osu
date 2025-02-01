@@ -7,13 +7,12 @@ using osu.Framework.Graphics.Animations;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Utils;
 using osu.Game.Rulesets.Judgements;
-using osu.Game.Rulesets.Mania.UI;
 using osu.Game.Rulesets.Scoring;
 using osu.Game.Skinning;
 
 namespace osu.Game.Rulesets.Mania.Skinning.Legacy
 {
-    public class LegacyManiaJudgementPiece : CompositeDrawable, IAnimatableJudgement
+    public partial class LegacyManiaJudgementPiece : CompositeDrawable, IAnimatableJudgement
     {
         private readonly HitResult result;
         private readonly Drawable animation;
@@ -23,7 +22,7 @@ namespace osu.Game.Rulesets.Mania.Skinning.Legacy
             this.result = result;
             this.animation = animation;
 
-            Anchor = Anchor.Centre;
+            Anchor = Anchor.BottomCentre;
             Origin = Anchor.Centre;
 
             AutoSizeAxes = Axes.Both;
@@ -32,28 +31,21 @@ namespace osu.Game.Rulesets.Mania.Skinning.Legacy
         [BackgroundDependencyLoader]
         private void load(ISkinSource skin)
         {
-            float? scorePosition = skin.GetManiaSkinConfig<float>(LegacyManiaSkinConfigurationLookups.ScorePosition)?.Value;
+            float hitPosition = skin.GetManiaSkinConfig<float>(LegacyManiaSkinConfigurationLookups.HitPosition)?.Value ?? 0;
+            float scorePosition = skin.GetManiaSkinConfig<float>(LegacyManiaSkinConfigurationLookups.ScorePosition)?.Value ?? 0;
 
-            if (scorePosition != null)
-                scorePosition -= Stage.HIT_TARGET_POSITION + 150;
+            float absoluteHitPosition = 480f * LegacyManiaSkinConfiguration.POSITION_SCALE_FACTOR - hitPosition;
+            Y = scorePosition - absoluteHitPosition;
 
-            Y = scorePosition ?? 0;
-
-            if (animation != null)
+            InternalChild = animation.With(d =>
             {
-                InternalChild = animation.With(d =>
-                {
-                    d.Anchor = Anchor.Centre;
-                    d.Origin = Anchor.Centre;
-                });
-            }
+                d.Anchor = Anchor.Centre;
+                d.Origin = Anchor.Centre;
+            });
         }
 
         public void PlayAnimation()
         {
-            if (animation == null)
-                return;
-
             (animation as IFramedAnimation)?.GotoFrame(0);
 
             this.FadeInFromZero(20, Easing.Out)
@@ -84,6 +76,6 @@ namespace osu.Game.Rulesets.Mania.Skinning.Legacy
             }
         }
 
-        public Drawable GetAboveHitObjectsProxiedContent() => null;
+        public Drawable? GetAboveHitObjectsProxiedContent() => null;
     }
 }

@@ -1,6 +1,8 @@
 ﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using System.Linq;
 using NUnit.Framework;
 using osu.Framework.Allocation;
@@ -21,7 +23,7 @@ using osu.Game.Rulesets.Scoring;
 namespace osu.Game.Rulesets.Catch.Tests
 {
     [TestFixture]
-    public class TestSceneCatcherArea : CatchSkinnableTestScene
+    public partial class TestSceneCatcherArea : CatchSkinnableTestScene
     {
         private RulesetInfo catchRuleset;
 
@@ -34,7 +36,7 @@ namespace osu.Game.Rulesets.Catch.Tests
 
         private ScheduledDelegate addManyFruit;
 
-        private BeatmapDifficulty beatmapDifficulty;
+        private IBeatmapDifficultyInfo beatmapDifficulty;
 
         public TestSceneCatcherArea()
         {
@@ -118,9 +120,9 @@ namespace osu.Game.Rulesets.Catch.Tests
             catchRuleset = rulesets.GetRuleset(2);
         }
 
-        private class TestCatcherArea : CatcherArea
+        private partial class TestCatcherArea : CatcherArea
         {
-            public TestCatcherArea(BeatmapDifficulty beatmapDifficulty)
+            public TestCatcherArea(IBeatmapDifficultyInfo beatmapDifficulty)
             {
                 var droppedObjectContainer = new DroppedObjectContainer();
                 Add(droppedObjectContainer);

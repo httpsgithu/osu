@@ -6,10 +6,9 @@ using osu.Game.Rulesets.Catch.UI;
 
 namespace osu.Game.Rulesets.Catch.Edit
 {
-    public class CatchEditorPlayfield : CatchPlayfield
+    public partial class CatchEditorPlayfield : CatchPlayfield
     {
-        // TODO fixme: the size of the catcher is not changed when circle size is changed in setup screen.
-        public CatchEditorPlayfield(BeatmapDifficulty difficulty)
+        public CatchEditorPlayfield(IBeatmapDifficultyInfo difficulty)
             : base(difficulty)
         {
         }

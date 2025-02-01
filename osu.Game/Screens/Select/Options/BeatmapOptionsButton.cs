@@ -18,7 +18,7 @@ using osu.Game.Graphics.UserInterface;
 
 namespace osu.Game.Screens.Select.Options
 {
-    public class BeatmapOptionsButton : OsuClickableContainer
+    public partial class BeatmapOptionsButton : OsuClickableContainer
     {
         private const float width = 130;
 
@@ -77,7 +77,7 @@ namespace osu.Game.Screens.Select.Options
         public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) => box.ReceivePositionalInputAt(screenSpacePos);
 
         public BeatmapOptionsButton()
-            : base(HoverSampleSet.Submit)
+            : base(HoverSampleSet.Button)
         {
             Width = width;
             RelativeSizeAxes = Axes.Y;

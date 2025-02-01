@@ -36,7 +36,7 @@ namespace osu.Game.Rulesets.Scoring
         /// An empty <see cref="HitWindows"/> with only <see cref="HitResult.Miss"/> and <see cref="HitResult.Perfect"/>.
         /// No time values are provided (meaning instantaneous hit or miss).
         /// </summary>
-        public static HitWindows Empty => new EmptyHitWindows();
+        public static HitWindows Empty { get; } = new EmptyHitWindows();
 
         public HitWindows()
         {
@@ -86,7 +86,7 @@ namespace osu.Game.Rulesets.Scoring
         {
             foreach (var range in GetRanges())
             {
-                var value = BeatmapDifficulty.DifficultyRange(difficulty, (range.Min, range.Average, range.Max));
+                double value = IBeatmapDifficultyInfo.DifficultyRange(difficulty, (range.Min, range.Average, range.Max));
 
                 switch (range.Result)
                 {
@@ -182,7 +182,7 @@ namespace osu.Game.Rulesets.Scoring
         /// </summary>
         protected virtual DifficultyRange[] GetRanges() => base_ranges;
 
-        public class EmptyHitWindows : HitWindows
+        private class EmptyHitWindows : HitWindows
         {
             private static readonly DifficultyRange[] ranges =
             {

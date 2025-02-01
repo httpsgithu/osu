@@ -1,4 +1,4 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 using osu.Framework.Allocation;
@@ -15,7 +15,7 @@ using osuTK;
 
 namespace osu.Game.Rulesets.Catch.Tests.Editor
 {
-    public abstract class CatchSelectionBlueprintTestScene : SelectionBlueprintTestScene
+    public abstract partial class CatchSelectionBlueprintTestScene : SelectionBlueprintTestScene
     {
         protected ScrollingHitObjectContainer HitObjectContainer => contentContainer.Playfield.HitObjectContainer;
 
@@ -29,8 +29,14 @@ namespace osu.Game.Rulesets.Catch.Tests.Editor
 
         protected CatchSelectionBlueprintTestScene()
         {
-            EditorBeatmap = new EditorBeatmap(new CatchBeatmap());
-            EditorBeatmap.BeatmapInfo.BaseDifficulty.CircleSize = 0;
+            var catchBeatmap = new CatchBeatmap
+            {
+                BeatmapInfo =
+                {
+                    Ruleset = new CatchRuleset().RulesetInfo,
+                }
+            };
+            EditorBeatmap = new EditorBeatmap(catchBeatmap) { Difficulty = { CircleSize = 0 } };
             EditorBeatmap.ControlPointInfo.Add(0, new TimingControlPoint
             {
                 BeatLength = 100
@@ -54,7 +60,7 @@ namespace osu.Game.Rulesets.Catch.Tests.Editor
             InputManager.MoveMouseTo(pos);
         });
 
-        private class EditorBeatmapDependencyContainer : Container
+        private partial class EditorBeatmapDependencyContainer : Container
         {
             [Cached]
             private readonly EditorClock editorClock;
@@ -62,10 +68,17 @@ namespace osu.Game.Rulesets.Catch.Tests.Editor
             [Cached]
             private readonly BindableBeatDivisor beatDivisor;
 
+            protected override Container<Drawable> Content { get; } = new Container { RelativeSizeAxes = Axes.Both };
+
             public EditorBeatmapDependencyContainer(IBeatmap beatmap, BindableBeatDivisor beatDivisor)
             {
-                editorClock = new EditorClock(beatmap, beatDivisor);
                 this.beatDivisor = beatDivisor;
+
+                InternalChildren = new Drawable[]
+                {
+                    editorClock = new EditorClock(beatmap, beatDivisor),
+                    Content,
+                };
             }
         }
     }

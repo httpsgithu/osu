@@ -8,9 +8,9 @@ using osu.Game.Screens.OnlinePlay.Multiplayer;
 
 namespace osu.Game.Tests.Visual.Multiplayer
 {
-    public class TestSceneCreateMultiplayerMatchButton : MultiplayerTestScene
+    public partial class TestSceneCreateMultiplayerMatchButton : MultiplayerTestScene
     {
-        private CreateMultiplayerMatchButton button;
+        private CreateMultiplayerMatchButton button = null!;
 
         public override void SetUpSteps()
         {
@@ -27,7 +27,7 @@ namespace osu.Game.Tests.Visual.Multiplayer
         [Test]
         public void TestButtonEnableStateChanges()
         {
-            IDisposable joiningRoomOperation = null;
+            IDisposable joiningRoomOperation = null!;
 
             assertButtonEnableState(true);
 
@@ -37,10 +37,10 @@ namespace osu.Game.Tests.Visual.Multiplayer
             AddStep("end joining room", () => joiningRoomOperation.Dispose());
             assertButtonEnableState(true);
 
-            AddStep("disconnect client", () => Client.Disconnect());
+            AddStep("disconnect client", () => MultiplayerClient.Disconnect());
             assertButtonEnableState(false);
 
-            AddStep("re-connect client", () => Client.Connect());
+            AddStep("re-connect client", () => MultiplayerClient.Connect());
             assertButtonEnableState(true);
         }
 

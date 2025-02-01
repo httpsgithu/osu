@@ -6,6 +6,7 @@ using JetBrains.Annotations;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Colour;
 using osu.Framework.Graphics.Containers;
@@ -13,9 +14,11 @@ using osu.Framework.Graphics.Effects;
 using osu.Framework.Graphics.Primitives;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Input.Events;
+using osu.Framework.Threading;
 using osu.Framework.Utils;
 using osu.Game.Graphics;
 using osu.Game.Graphics.Sprites;
+using osu.Game.Overlays;
 using osu.Game.Rulesets.Edit;
 using osu.Game.Rulesets.Objects;
 using osu.Game.Rulesets.Objects.Types;
@@ -25,32 +28,38 @@ using osuTK.Graphics;
 
 namespace osu.Game.Screens.Edit.Compose.Components.Timeline
 {
-    public class TimelineHitObjectBlueprint : SelectionBlueprint<HitObject>
+    public partial class TimelineHitObjectBlueprint : SelectionBlueprint<HitObject>
     {
-        private const float circle_size = 38;
+        private const float circle_size = 32;
 
-        private Container repeatsContainer;
+        private Container? repeatsContainer;
 
-        public Action<DragEvent> OnDragHandled;
+        public Action<DragEvent?>? OnDragHandled = null!;
 
         [UsedImplicitly]
         private readonly Bindable<double> startTime;
 
-        private Bindable<int> indexInCurrentComboBindable;
+        private Bindable<int>? indexInCurrentComboBindable;
 
-        private Bindable<int> comboIndexBindable;
-        private Bindable<int> comboIndexWithOffsetsBindable;
+        private Bindable<int>? comboIndexBindable;
+        private Bindable<int>? comboIndexWithOffsetsBindable;
 
-        private Bindable<Color4> displayColourBindable;
+        private Bindable<Color4> displayColourBindable = null!;
 
         private readonly ExtendableCircle circle;
         private readonly Border border;
 
         private readonly Container colouredComponents;
+        private readonly Container sampleComponents;
         private readonly OsuSpriteText comboIndexText;
+        private readonly SamplePointPiece samplePointPiece;
+        private readonly DifficultyPointPiece? difficultyPointPiece;
 
         [Resolved]
-        private ISkinSource skin { get; set; }
+        private ISkinSource skin { get; set; } = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
 
         public TimelineHitObjectBlueprint(HitObject item)
             : base(item)
@@ -96,6 +105,17 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
                         },
                     }
                 },
+                samplePointPiece = new SamplePointPiece(Item)
+                {
+                    Anchor = Anchor.BottomLeft,
+                    Origin = Anchor.TopCentre,
+                    RelativePositionAxes = Axes.X,
+                    AlternativeColor = Item is IHasRepeats
+                },
+                sampleComponents = new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                },
             });
 
             if (item is IHasDuration)
@@ -103,6 +123,15 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
                 colouredComponents.Add(new DragArea(item)
                 {
                     OnDragHandled = e => OnDragHandled?.Invoke(e)
+                });
+            }
+
+            if (item is IHasSliderVelocity)
+            {
+                AddInternal(difficultyPointPiece = new DifficultyPointPiece(Item)
+                {
+                    Anchor = Anchor.TopLeft,
+                    Origin = Anchor.BottomCentre
                 });
             }
         }
@@ -120,7 +149,10 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
 
                 case IHasComboInformation comboInfo:
                     indexInCurrentComboBindable = comboInfo.IndexInCurrentComboBindable.GetBoundCopy();
-                    indexInCurrentComboBindable.BindValueChanged(_ => updateComboIndex(), true);
+                    indexInCurrentComboBindable.BindValueChanged(_ =>
+                    {
+                        comboIndexText.Text = (indexInCurrentComboBindable.Value + 1).ToString();
+                    }, true);
 
                     comboIndexBindable = comboInfo.ComboIndexBindable.GetBoundCopy();
                     comboIndexWithOffsetsBindable = comboInfo.ComboIndexWithOffsetsBindable.GetBoundCopy();
@@ -145,8 +177,6 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
             updateColour();
         }
 
-        private void updateComboIndex() => comboIndexText.Text = (indexInCurrentComboBindable.Value + 1).ToString();
-
         private void updateColour()
         {
             Color4 colour;
@@ -162,7 +192,8 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
                     break;
 
                 default:
-                    return;
+                    colour = colourProvider.Highlight1;
+                    break;
             }
 
             if (IsSelected)
@@ -175,8 +206,8 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
             else
                 circle.Colour = colour;
 
-            var col = circle.Colour.TopLeft.Linear;
-            colouredComponents.Colour = OsuColour.ForegroundTextColourFor(col);
+            var averageColour = Interpolation.ValueAt(0.5, circle.Colour.TopLeft, circle.Colour.TopRight, 0, 1);
+            colouredComponents.Colour = OsuColour.ForegroundTextColourFor(averageColour);
         }
 
         protected override void Update()
@@ -212,6 +243,22 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
                     X = (float)(i + 1) / (repeats.RepeatCount + 1)
                 });
             }
+
+            // Add node sample pieces
+            sampleComponents.Clear();
+
+            for (int i = 0; i < repeats.RepeatCount + 2; i++)
+            {
+                sampleComponents.Add(new NodeSamplePointPiece(Item, i)
+                {
+                    X = (float)i / (repeats.RepeatCount + 1),
+                    RelativePositionAxes = Axes.X,
+                    Anchor = Anchor.BottomLeft,
+                    Origin = Anchor.TopCentre
+                });
+            }
+
+            samplePointPiece.X = 1f / (repeats.RepeatCount + 1) / 2;
         }
 
         protected override bool ShouldBeConsideredForInput(Drawable child) => true;
@@ -223,7 +270,34 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
 
         public override Vector2 ScreenSpaceSelectionPoint => ScreenSpaceDrawQuad.TopLeft;
 
-        private class Tick : Circle
+        protected override bool ComputeIsMaskedAway(RectangleF maskingBounds)
+        {
+            // Since children are exceeding the component size, we need to use a custom quad to compute whether it should be masked away.
+
+            // If the component isn't considered masked away by itself, there's no need to apply custom logic.
+            if (!base.ComputeIsMaskedAway(maskingBounds))
+                return false;
+
+            // If the component is considered masked away, we'll use children to create an extended quad that encapsulates all parts of this blueprint
+            // to ensure it doesn't pop in and out of existence abruptly when scrolling the timeline.
+            var rect = RectangleF.Union(ScreenSpaceDrawQuad.AABBFloat, circle.ScreenSpaceDrawQuad.AABBFloat);
+            rect = RectangleF.Union(rect, samplePointPiece.ScreenSpaceDrawQuad.AABBFloat);
+
+            if (difficultyPointPiece != null)
+                rect = RectangleF.Union(rect, difficultyPointPiece.ScreenSpaceDrawQuad.AABBFloat);
+
+            return !Precision.AlmostIntersects(maskingBounds, rect);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (skin.IsNotNull())
+                skin.SourceChanged -= updateColour;
+        }
+
+        private partial class Tick : Circle
         {
             public Tick()
             {
@@ -234,18 +308,29 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
             }
         }
 
-        public class DragArea : Circle
+        public partial class DragArea : Circle
         {
-            private readonly HitObject hitObject;
+            private readonly HitObject? hitObject;
 
             [Resolved]
-            private Timeline timeline { get; set; }
+            private EditorBeatmap beatmap { get; set; } = null!;
 
-            public Action<DragEvent> OnDragHandled;
+            [Resolved]
+            private IBeatSnapProvider beatSnapProvider { get; set; } = null!;
+
+            [Resolved]
+            private Timeline timeline { get; set; } = null!;
+
+            [Resolved]
+            private IEditorChangeHandler? changeHandler { get; set; }
+
+            private ScheduledDelegate? dragOperation;
+
+            public Action<DragEvent?>? OnDragHandled;
 
             public override bool HandlePositionalInput => hitObject != null;
 
-            public DragArea(HitObject hitObject)
+            public DragArea(HitObject? hitObject)
             {
                 this.hitObject = hitObject;
 
@@ -316,15 +401,6 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
                 this.FadeTo(IsHovered || hasMouseDown ? 1f : 0.9f, 200, Easing.OutQuint);
             }
 
-            [Resolved]
-            private EditorBeatmap beatmap { get; set; }
-
-            [Resolved]
-            private IBeatSnapProvider beatSnapProvider { get; set; }
-
-            [Resolved(CanBeNull = true)]
-            private IEditorChangeHandler changeHandler { get; set; }
-
             protected override bool OnDragStart(DragStartEvent e)
             {
                 changeHandler?.BeginChange();
@@ -335,47 +411,72 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
             {
                 base.OnDrag(e);
 
-                OnDragHandled?.Invoke(e);
-
-                if (timeline.SnapScreenSpacePositionToValidTime(e.ScreenSpaceMousePosition).Time is double time)
+                // schedule is temporary to ensure we don't process multiple times on a single update frame. we need to find a better method of doing this.
+                // without it, a hitobject's endtime may not always be in a valid state (ie. sliders, which needs to recompute their path).
+                dragOperation?.Cancel();
+                dragOperation = Scheduler.Add(() =>
                 {
-                    switch (hitObject)
+                    OnDragHandled?.Invoke(e);
+
+                    if (timeline.FindSnappedPositionAndTime(e.ScreenSpaceMousePosition).Time is double time)
                     {
-                        case IHasRepeats repeatHitObject:
-                            // find the number of repeats which can fit in the requested time.
-                            var lengthOfOneRepeat = repeatHitObject.Duration / (repeatHitObject.RepeatCount + 1);
-                            var proposedCount = Math.Max(0, (int)Math.Round((time - hitObject.StartTime) / lengthOfOneRepeat) - 1);
+                        switch (hitObject)
+                        {
+                            case IHasRepeats repeatHitObject:
+                                double proposedDuration = time - hitObject.StartTime;
 
-                            if (proposedCount == repeatHitObject.RepeatCount)
-                                return;
+                                if (e.CurrentState.Keyboard.ShiftPressed && hitObject is IHasSliderVelocity hasSliderVelocity)
+                                {
+                                    double newVelocity = hasSliderVelocity.SliderVelocityMultiplier * (repeatHitObject.Duration / proposedDuration);
 
-                            repeatHitObject.RepeatCount = proposedCount;
-                            beatmap.Update(hitObject);
-                            break;
+                                    if (Precision.AlmostEquals(newVelocity, hasSliderVelocity.SliderVelocityMultiplier))
+                                        return;
 
-                        case IHasDuration endTimeHitObject:
-                            var snappedTime = Math.Max(hitObject.StartTime, beatSnapProvider.SnapTime(time));
+                                    hasSliderVelocity.SliderVelocityMultiplier = newVelocity;
+                                    beatmap.Update(hitObject);
+                                }
+                                else
+                                {
+                                    // find the number of repeats which can fit in the requested time.
+                                    double lengthOfOneRepeat = repeatHitObject.Duration / (repeatHitObject.RepeatCount + 1);
+                                    int proposedCount = Math.Max(0, (int)Math.Round(proposedDuration / lengthOfOneRepeat) - 1);
 
-                            if (endTimeHitObject.EndTime == snappedTime || Precision.AlmostEquals(snappedTime, hitObject.StartTime, beatmap.GetBeatLengthAtTime(snappedTime)))
-                                return;
+                                    if (proposedCount == repeatHitObject.RepeatCount || Precision.AlmostEquals(lengthOfOneRepeat, 0))
+                                        return;
 
-                            endTimeHitObject.Duration = snappedTime - hitObject.StartTime;
-                            beatmap.Update(hitObject);
-                            break;
+                                    repeatHitObject.RepeatCount = proposedCount;
+                                    beatmap.Update(hitObject);
+                                }
+
+                                break;
+
+                            case IHasDuration endTimeHitObject:
+                                double snappedTime = Math.Max(hitObject.StartTime + beatSnapProvider.GetBeatLengthAtTime(hitObject.StartTime), beatSnapProvider.SnapTime(time));
+
+                                if (endTimeHitObject.EndTime == snappedTime)
+                                    return;
+
+                                endTimeHitObject.Duration = snappedTime - hitObject.StartTime;
+                                beatmap.Update(hitObject);
+                                break;
+                        }
                     }
-                }
+                });
             }
 
             protected override void OnDragEnd(DragEndEvent e)
             {
                 base.OnDragEnd(e);
 
-                OnDragHandled?.Invoke(null);
+                dragOperation?.Cancel();
+                dragOperation = null;
+
                 changeHandler?.EndChange();
+                OnDragHandled?.Invoke(null);
             }
         }
 
-        public class Border : ExtendableCircle
+        public partial class Border : ExtendableCircle
         {
             [BackgroundDependencyLoader]
             private void load(OsuColour colours)
@@ -391,8 +492,14 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
         /// <summary>
         /// A circle with externalised end caps so it can take up the full width of a relative width area.
         /// </summary>
-        public class ExtendableCircle : CompositeDrawable
+        public partial class ExtendableCircle : CompositeDrawable
         {
+            public new ColourInfo Colour
+            {
+                get => Content.Colour;
+                set => Content.Colour = value;
+            }
+
             protected readonly Circle Content;
 
             public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) => Content.ReceivePositionalInputAt(screenSpacePos);
@@ -412,7 +519,7 @@ namespace osu.Game.Screens.Edit.Compose.Components.Timeline
                     {
                         Type = EdgeEffectType.Shadow,
                         Radius = 5,
-                        Colour = Color4.Black.Opacity(0.4f)
+                        Colour = Color4.Black.Opacity(0.05f)
                     }
                 };
             }

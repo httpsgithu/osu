@@ -10,7 +10,7 @@ using osu.Game.Users;
 
 namespace osu.Game.Overlays.Rankings.Tables
 {
-    public class PerformanceTable : UserBasedTable
+    public partial class PerformanceTable : UserBasedTable
     {
         public PerformanceTable(int page, IReadOnlyList<UserStatistics> rankings)
             : base(page, rankings)
@@ -24,7 +24,7 @@ namespace osu.Game.Overlays.Rankings.Tables
 
         protected override Drawable[] CreateUniqueContent(UserStatistics item) => new Drawable[]
         {
-            new RowText { Text = item.PP?.ToLocalisableString(@"N0"), }
+            new RowText { Text = item.PP?.ToLocalisableString(@"N0") ?? default, }
         };
     }
 }

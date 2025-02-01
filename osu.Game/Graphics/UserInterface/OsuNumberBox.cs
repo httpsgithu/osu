@@ -1,10 +1,17 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
+
+using osu.Framework.Input;
 
 namespace osu.Game.Graphics.UserInterface
 {
-    public class OsuNumberBox : OsuTextBox
+    public partial class OsuNumberBox : OsuTextBox
     {
-        protected override bool CanAddCharacter(char character) => char.IsNumber(character);
+        public OsuNumberBox()
+        {
+            InputProperties = new TextInputProperties(TextInputType.Number, false);
+
+            SelectAllOnFocus = true;
+        }
     }
 }

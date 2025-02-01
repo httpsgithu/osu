@@ -1,4 +1,4 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
@@ -20,7 +20,7 @@ using osuTK.Graphics;
 
 namespace osu.Game.Overlays.BeatmapSet.Scores
 {
-    public class TopScoreUserSection : CompositeDrawable
+    public partial class TopScoreUserSection : CompositeDrawable
     {
         private readonly SpriteText rankText;
         private readonly UpdateableRank rank;
@@ -116,9 +116,8 @@ namespace osu.Game.Overlays.BeatmapSet.Scores
                             {
                                 Anchor = Anchor.CentreLeft,
                                 Origin = Anchor.CentreLeft,
-                                Size = new Vector2(19, 13),
+                                Size = new Vector2(19, 14),
                                 Margin = new MarginPadding { Top = 3 }, // makes spacing look more even
-                                ShowPlaceholderOnNull = false,
                             },
                         }
                     }
@@ -139,7 +138,7 @@ namespace osu.Game.Overlays.BeatmapSet.Scores
             set
             {
                 avatar.User = value.User;
-                flag.Country = value.User.Country;
+                flag.CountryCode = value.User.CountryCode;
                 achievedOn.Date = value.Date;
 
                 usernameText.Clear();

@@ -3,21 +3,20 @@
 
 using osu.Framework.Bindables;
 using osu.Framework.Localisation;
+using osu.Game.Online.API.Requests.Responses;
 using osu.Game.Resources.Localisation.Web;
-using osu.Game.Users;
-using static osu.Game.Users.User;
 
 namespace osu.Game.Overlays.Profile.Sections.Historical
 {
-    public class ReplaysSubsection : ChartProfileSubsection
+    public partial class ReplaysSubsection : ChartProfileSubsection
     {
         protected override LocalisableString GraphCounterName => UsersStrings.ShowExtraHistoricalReplaysWatchedCountsCountLabel;
 
-        public ReplaysSubsection(Bindable<User> user)
+        public ReplaysSubsection(Bindable<UserProfileData?> user)
             : base(user, UsersStrings.ShowExtraHistoricalReplaysWatchedCountsTitle)
         {
         }
 
-        protected override UserHistoryCount[] GetValues(User user) => user?.ReplaysWatchedCounts;
+        protected override APIUserHistoryCount[]? GetValues(APIUser? user) => user?.ReplaysWatchedCounts;
     }
 }

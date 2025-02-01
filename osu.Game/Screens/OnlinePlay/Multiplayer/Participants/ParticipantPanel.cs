@@ -1,10 +1,12 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using osu.Framework.Allocation;
 using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Colour;
 using osu.Framework.Graphics.Containers;
@@ -15,9 +17,12 @@ using osu.Framework.Graphics.UserInterface;
 using osu.Game.Graphics;
 using osu.Game.Graphics.Sprites;
 using osu.Game.Graphics.UserInterface;
+using osu.Game.Online;
 using osu.Game.Online.API;
 using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Rooms;
 using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
 using osu.Game.Screens.Play.HUD;
 using osu.Game.Users;
 using osu.Game.Users.Drawables;
@@ -26,23 +31,26 @@ using osuTK.Graphics;
 
 namespace osu.Game.Screens.OnlinePlay.Multiplayer.Participants
 {
-    public class ParticipantPanel : MultiplayerRoomComposite, IHasContextMenu
+    public partial class ParticipantPanel : CompositeDrawable, IHasContextMenu
     {
         public readonly MultiplayerRoomUser User;
 
         [Resolved]
-        private IAPIProvider api { get; set; }
+        private IAPIProvider api { get; set; } = null!;
 
         [Resolved]
-        private RulesetStore rulesets { get; set; }
+        private IRulesetStore rulesets { get; set; } = null!;
 
-        private SpriteIcon crown;
+        [Resolved]
+        private MultiplayerClient client { get; set; } = null!;
 
-        private OsuSpriteText userRankText;
-        private ModDisplay userModsDisplay;
-        private StateDisplay userStateDisplay;
+        private SpriteIcon crown = null!;
 
-        private IconButton kickButton;
+        private OsuSpriteText userRankText = null!;
+        private ModDisplay userModsDisplay = null!;
+        private StateDisplay userStateDisplay = null!;
+
+        private IconButton kickButton = null!;
 
         public ParticipantPanel(MultiplayerRoomUser user)
         {
@@ -123,15 +131,15 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer.Participants
                                         {
                                             Anchor = Anchor.CentreLeft,
                                             Origin = Anchor.CentreLeft,
-                                            Size = new Vector2(30, 20),
-                                            Country = user?.Country
+                                            Size = new Vector2(28, 20),
+                                            CountryCode = user?.CountryCode ?? default
                                         },
                                         new OsuSpriteText
                                         {
                                             Anchor = Anchor.CentreLeft,
                                             Origin = Anchor.CentreLeft,
                                             Font = OsuFont.GetFont(weight: FontWeight.Bold, size: 18),
-                                            Text = user?.Username
+                                            Text = user?.Username ?? string.Empty
                                         },
                                         userRankText = new OsuSpriteText
                                         {
@@ -167,49 +175,59 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer.Participants
                             Origin = Anchor.Centre,
                             Alpha = 0,
                             Margin = new MarginPadding(4),
-                            Action = () => Client.KickUser(User.UserID),
+                            Action = () => client.KickUser(User.UserID).FireAndForget(),
                         },
                     },
                 }
             };
         }
 
-        protected override void OnRoomUpdated()
+        protected override void LoadComplete()
         {
-            base.OnRoomUpdated();
+            base.LoadComplete();
 
-            if (Room == null || Client.LocalUser == null)
+            client.RoomUpdated += onRoomUpdated;
+            updateState();
+        }
+
+        private void onRoomUpdated() => Scheduler.AddOnce(updateState);
+
+        private void updateState()
+        {
+            if (client.Room == null || client.LocalUser == null)
                 return;
 
             const double fade_time = 50;
 
-            var ruleset = rulesets.GetRuleset(Room.Settings.RulesetID).CreateInstance();
+            MultiplayerPlaylistItem? currentItem = client.Room.GetCurrentItem();
+            Ruleset? ruleset = currentItem != null ? rulesets.GetRuleset(currentItem.RulesetID)?.CreateInstance() : null;
 
-            var currentModeRank = User.User?.RulesetsStatistics?.GetValueOrDefault(ruleset.ShortName)?.GlobalRank;
+            int? currentModeRank = ruleset != null ? User.User?.RulesetsStatistics?.GetValueOrDefault(ruleset.ShortName)?.GlobalRank : null;
             userRankText.Text = currentModeRank != null ? $"#{currentModeRank.Value:N0}" : string.Empty;
 
             userStateDisplay.UpdateStatus(User.State, User.BeatmapAvailability);
 
-            if (Client.IsHost && !User.Equals(Client.LocalUser))
-                kickButton.FadeIn(fade_time);
+            if ((User.BeatmapAvailability.State == DownloadState.LocallyAvailable) && (User.State != MultiplayerUserState.Spectating))
+                userModsDisplay.FadeIn(fade_time);
             else
-                kickButton.FadeOut(fade_time);
+                userModsDisplay.FadeOut(fade_time);
 
-            if (Room.Host?.Equals(User) == true)
-                crown.FadeIn(fade_time);
-            else
-                crown.FadeOut(fade_time);
+            kickButton.Alpha = client.IsHost && !User.Equals(client.LocalUser) ? 1 : 0;
+            crown.Alpha = client.Room.Host?.Equals(User) == true ? 1 : 0;
 
             // If the mods are updated at the end of the frame, the flow container will skip a reflow cycle: https://github.com/ppy/osu-framework/issues/4187
             // This looks particularly jarring here, so re-schedule the update to that start of our frame as a fix.
-            Schedule(() => userModsDisplay.Current.Value = User.Mods.Select(m => m.ToMod(ruleset)).ToList());
+            Schedule(() =>
+            {
+                userModsDisplay.Current.Value = ruleset != null ? User.Mods.Select(m => m.ToMod(ruleset)).ToList() : Array.Empty<Mod>();
+            });
         }
 
-        public MenuItem[] ContextMenuItems
+        public MenuItem[]? ContextMenuItems
         {
             get
             {
-                if (Room == null)
+                if (client.Room == null)
                     return null;
 
                 // If the local user is targetted.
@@ -217,7 +235,7 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer.Participants
                     return null;
 
                 // If the local user is not the host of the room.
-                if (Room.Host?.UserID != api.LocalUser.Value.Id)
+                if (client.Room.Host?.UserID != api.LocalUser.Value.Id)
                     return null;
 
                 int targetUser = User.UserID;
@@ -227,24 +245,32 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer.Participants
                     new OsuMenuItem("Give host", MenuItemType.Standard, () =>
                     {
                         // Ensure the local user is still host.
-                        if (!Client.IsHost)
+                        if (!client.IsHost)
                             return;
 
-                        Client.TransferHost(targetUser);
+                        client.TransferHost(targetUser).FireAndForget();
                     }),
                     new OsuMenuItem("Kick", MenuItemType.Destructive, () =>
                     {
                         // Ensure the local user is still host.
-                        if (!Client.IsHost)
+                        if (!client.IsHost)
                             return;
 
-                        Client.KickUser(targetUser);
+                        client.KickUser(targetUser).FireAndForget();
                     })
                 };
             }
         }
 
-        public class KickButton : IconButton
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (client.IsNotNull())
+                client.RoomUpdated -= onRoomUpdated;
+        }
+
+        public partial class KickButton : IconButton
         {
             public KickButton()
             {

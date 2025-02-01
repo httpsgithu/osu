@@ -1,8 +1,7 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
-using System.Collections.Generic;
 using osu.Framework.Allocation;
 using osu.Framework.Extensions.Color4Extensions;
 using osu.Framework.Graphics;
@@ -21,7 +20,7 @@ using osuTK.Graphics;
 
 namespace osu.Game.Overlays.Changelog
 {
-    public class ChangelogSupporterPromo : CompositeDrawable
+    public partial class ChangelogSupporterPromo : CompositeDrawable
     {
         private const float image_container_width = 164;
         private const float heart_size = 75;
@@ -33,7 +32,7 @@ namespace osu.Game.Overlays.Changelog
             Padding = new MarginPadding
             {
                 Vertical = 20,
-                Horizontal = 50,
+                Horizontal = WaveOverlayContainer.HORIZONTAL_PADDING,
             };
         }
 
@@ -78,7 +77,7 @@ namespace osu.Game.Overlays.Changelog
                                     Direction = FillDirection.Vertical,
                                     Anchor = Anchor.CentreLeft,
                                     Origin = Anchor.CentreLeft,
-                                    Padding = new MarginPadding { Right = 50 + image_container_width },
+                                    Padding = new MarginPadding { Right = WaveOverlayContainer.HORIZONTAL_PADDING + image_container_width },
                                     Children = new Drawable[]
                                     {
                                         new OsuSpriteText
@@ -102,7 +101,7 @@ namespace osu.Game.Overlays.Changelog
                                             t.Colour = colour.PinkLighter;
                                         })
                                         {
-                                            Text = ChangelogStrings.SupportText2.ToString(),
+                                            Text = ChangelogStrings.SupportText2,
                                             Margin = new MarginPadding { Top = 10 },
                                             RelativeSizeAxes = Axes.X,
                                             AutoSizeAxes = Axes.Y,
@@ -159,19 +158,19 @@ namespace osu.Game.Overlays.Changelog
             supportLinkText.AddText(" today!");
         }
 
-        private class SupporterPromoLinkFlowContainer : LinkFlowContainer
+        private partial class SupporterPromoLinkFlowContainer : LinkFlowContainer
         {
             public SupporterPromoLinkFlowContainer(Action<SpriteText> defaultCreationParameters)
                 : base(defaultCreationParameters)
             {
             }
 
-            protected override DrawableLinkCompiler CreateLinkCompiler(IEnumerable<SpriteText> parts) => new SupporterPromoLinkCompiler(parts);
+            protected override DrawableLinkCompiler CreateLinkCompiler(ITextPart textPart) => new SupporterPromoLinkCompiler(textPart);
 
-            private class SupporterPromoLinkCompiler : DrawableLinkCompiler
+            private partial class SupporterPromoLinkCompiler : DrawableLinkCompiler
             {
-                public SupporterPromoLinkCompiler(IEnumerable<Drawable> parts)
-                    : base(parts)
+                public SupporterPromoLinkCompiler(ITextPart part)
+                    : base(part)
                 {
                 }
 

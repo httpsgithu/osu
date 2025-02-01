@@ -16,14 +16,13 @@ using osuTK.Input;
 
 namespace osu.Game.Tests.Visual.Multiplayer
 {
-    public class TestSceneMultiplayerLoungeSubScreen : OnlinePlayTestScene
+    public partial class TestSceneMultiplayerLoungeSubScreen : OnlinePlayTestScene
     {
-        protected new TestRequestHandlingRoomManager RoomManager => (TestRequestHandlingRoomManager)base.RoomManager;
+        protected new TestRoomManager RoomManager => (TestRoomManager)base.RoomManager;
 
-        private LoungeSubScreen loungeScreen;
-
-        private Room lastJoinedRoom;
-        private string lastJoinedPassword;
+        private LoungeSubScreen loungeScreen = null!;
+        private Room? lastJoinedRoom;
+        private string? lastJoinedPassword;
 
         public override void SetUpSteps()
         {
@@ -85,7 +84,7 @@ namespace osu.Game.Tests.Visual.Multiplayer
         [Test]
         public void TestJoinRoomWithIncorrectPasswordViaButton()
         {
-            DrawableLoungeRoom.PasswordEntryPopover passwordEntryPopover = null;
+            DrawableLoungeRoom.PasswordEntryPopover? passwordEntryPopover = null;
 
             AddStep("add room", () => RoomManager.AddRooms(1, withPassword: true));
             AddStep("select room", () => InputManager.Key(Key.Down));
@@ -95,14 +94,14 @@ namespace osu.Game.Tests.Visual.Multiplayer
             AddStep("press join room button", () => passwordEntryPopover.ChildrenOfType<OsuButton>().First().TriggerClick());
 
             AddAssert("room not joined", () => loungeScreen.IsCurrentScreen());
-            AddUntilStep("password prompt still visible", () => passwordEntryPopover.State.Value == Visibility.Visible);
+            AddUntilStep("password prompt still visible", () => passwordEntryPopover!.State.Value == Visibility.Visible);
             AddAssert("textbox still focused", () => InputManager.FocusedDrawable is OsuPasswordTextBox);
         }
 
         [Test]
         public void TestJoinRoomWithIncorrectPasswordViaEnter()
         {
-            DrawableLoungeRoom.PasswordEntryPopover passwordEntryPopover = null;
+            DrawableLoungeRoom.PasswordEntryPopover? passwordEntryPopover = null;
 
             AddStep("add room", () => RoomManager.AddRooms(1, withPassword: true));
             AddStep("select room", () => InputManager.Key(Key.Down));
@@ -112,14 +111,14 @@ namespace osu.Game.Tests.Visual.Multiplayer
             AddStep("press enter", () => InputManager.Key(Key.Enter));
 
             AddAssert("room not joined", () => loungeScreen.IsCurrentScreen());
-            AddUntilStep("password prompt still visible", () => passwordEntryPopover.State.Value == Visibility.Visible);
+            AddUntilStep("password prompt still visible", () => passwordEntryPopover!.State.Value == Visibility.Visible);
             AddAssert("textbox still focused", () => InputManager.FocusedDrawable is OsuPasswordTextBox);
         }
 
         [Test]
         public void TestJoinRoomWithCorrectPassword()
         {
-            DrawableLoungeRoom.PasswordEntryPopover passwordEntryPopover = null;
+            DrawableLoungeRoom.PasswordEntryPopover? passwordEntryPopover = null;
 
             AddStep("add room", () => RoomManager.AddRooms(1, withPassword: true));
             AddStep("select room", () => InputManager.Key(Key.Down));
@@ -135,7 +134,7 @@ namespace osu.Game.Tests.Visual.Multiplayer
         [Test]
         public void TestJoinRoomWithPasswordViaKeyboardOnly()
         {
-            DrawableLoungeRoom.PasswordEntryPopover passwordEntryPopover = null;
+            DrawableLoungeRoom.PasswordEntryPopover? passwordEntryPopover = null;
 
             AddStep("add room", () => RoomManager.AddRooms(1, withPassword: true));
             AddStep("select room", () => InputManager.Key(Key.Down));
@@ -148,7 +147,7 @@ namespace osu.Game.Tests.Visual.Multiplayer
             AddAssert("room join password correct", () => lastJoinedPassword == "password");
         }
 
-        private void onRoomJoined(Room room, string password)
+        private void onRoomJoined(Room room, string? password)
         {
             lastJoinedRoom = room;
             lastJoinedPassword = password;

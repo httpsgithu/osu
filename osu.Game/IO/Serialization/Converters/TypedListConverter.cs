@@ -1,6 +1,8 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
@@ -60,8 +62,12 @@ namespace osu.Game.IO.Serialization.Converters
                 if (tok["$type"] == null)
                     throw new JsonException("Expected $type token.");
 
-                var typeName = lookupTable[(int)tok["$type"]];
-                var instance = (T)Activator.CreateInstance(Type.GetType(typeName).AsNonNull());
+                // Prevent instantiation of types that do not inherit the type targetted by this converter
+                Type type = Type.GetType(lookupTable[(int)tok["$type"]]).AsNonNull();
+                if (!type.IsAssignableTo(typeof(T)))
+                    continue;
+
+                var instance = (T)Activator.CreateInstance(type)!;
                 serializer.Populate(itemReader, instance);
 
                 list.Add(instance);
@@ -80,7 +86,7 @@ namespace osu.Game.IO.Serialization.Converters
                 var type = item.GetType();
                 var assemblyName = type.Assembly.GetName();
 
-                var typeString = $"{type.FullName}, {assemblyName.Name}";
+                string typeString = $"{type.FullName}, {assemblyName.Name}";
                 if (requiresTypeVersion)
                     typeString += $", {assemblyName.Version}";
 

@@ -6,44 +6,80 @@ using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Game.Beatmaps.ControlPoints;
-using osu.Game.Beatmaps.Timing;
+using osu.Game.Configuration;
 using osu.Game.Graphics.UserInterfaceV2;
-using osu.Game.Overlays.Settings;
+using osu.Game.Localisation;
 
 namespace osu.Game.Screens.Edit.Timing
 {
-    internal class TimingSection : Section<TimingControlPoint>
+    internal partial class TimingSection : Section<TimingControlPoint>
     {
-        private SettingsSlider<double> bpmSlider;
-        private SettingsEnumDropdown<TimeSignatures> timeSignature;
-        private BPMTextBox bpmTextEntry;
+        private LabelledTimeSignature timeSignature = null!;
+        private LabelledSwitchButton omitBarLine = null!;
+        private BPMTextBox bpmTextEntry = null!;
+
+        [Resolved]
+        private OsuConfigManager configManager { get; set; } = null!;
 
         [BackgroundDependencyLoader]
         private void load()
         {
             Flow.AddRange(new Drawable[]
             {
-                bpmTextEntry = new BPMTextBox(),
-                bpmSlider = new BPMSlider(),
-                timeSignature = new SettingsEnumDropdown<TimeSignatures>
+                new LabelledSwitchButton
                 {
-                    LabelText = "Time Signature"
+                    Label = EditorStrings.AdjustExistingObjectsOnTimingChanges,
+                    FixedLabelWidth = 220,
+                    Current = configManager.GetBindable<bool>(OsuSetting.EditorAdjustExistingObjectsOnTimingChanges),
                 },
+                new TapTimingControl(),
+                bpmTextEntry = new BPMTextBox(),
+                timeSignature = new LabelledTimeSignature
+                {
+                    Label = "Time Signature"
+                },
+                omitBarLine = new LabelledSwitchButton { Label = "Skip Bar Line" },
             });
         }
 
-        protected override void OnControlPointChanged(ValueChangedEvent<TimingControlPoint> point)
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            bpmTextEntry.Current.BindValueChanged(_ => saveChanges());
+            omitBarLine.Current.BindValueChanged(_ => saveChanges());
+            timeSignature.Current.BindValueChanged(_ => saveChanges());
+
+            void saveChanges()
+            {
+                if (!isRebinding) ChangeHandler?.SaveState();
+            }
+
+            bpmTextEntry.OnCommit = (oldBeatLength, _) =>
+            {
+                if (!configManager.Get<bool>(OsuSetting.EditorAdjustExistingObjectsOnTimingChanges) || ControlPoint.Value == null)
+                    return;
+
+                Beatmap.BeginChange();
+                TimingSectionAdjustments.SetHitObjectBPM(Beatmap, ControlPoint.Value, oldBeatLength);
+                Beatmap.UpdateAllHitObjects();
+                Beatmap.EndChange();
+            };
+        }
+
+        private bool isRebinding;
+
+        protected override void OnControlPointChanged(ValueChangedEvent<TimingControlPoint?> point)
         {
             if (point.NewValue != null)
             {
-                bpmSlider.Current = point.NewValue.BeatLengthBindable;
-                bpmSlider.Current.BindValueChanged(_ => ChangeHandler?.SaveState());
+                isRebinding = true;
 
                 bpmTextEntry.Bindable = point.NewValue.BeatLengthBindable;
-                // no need to hook change handler here as it's the same bindable as above
-
                 timeSignature.Current = point.NewValue.TimeSignatureBindable;
-                timeSignature.Current.BindValueChanged(_ => ChangeHandler?.SaveState());
+                omitBarLine.Current = point.NewValue.OmitFirstBarLineBindable;
+
+                isRebinding = false;
             }
         }
 
@@ -54,21 +90,27 @@ namespace osu.Game.Screens.Edit.Timing
             return new TimingControlPoint
             {
                 BeatLength = reference.BeatLength,
-                TimeSignature = reference.TimeSignature
+                TimeSignature = reference.TimeSignature,
+                OmitFirstBarLine = reference.OmitFirstBarLine,
             };
         }
 
-        private class BPMTextBox : LabelledTextBox
+        private partial class BPMTextBox : LabelledTextBox
         {
+            public new Action<double, double>? OnCommit { get; set; }
+
             private readonly BindableNumber<double> beatLengthBindable = new TimingControlPoint().BeatLengthBindable;
 
             public BPMTextBox()
             {
                 Label = "BPM";
+                SelectAllOnFocus = true;
 
-                OnCommit += (val, isNew) =>
+                base.OnCommit += (_, isNew) =>
                 {
                     if (!isNew) return;
+
+                    double oldBeatLength = beatLengthBindable.Value;
 
                     try
                     {
@@ -83,6 +125,7 @@ namespace osu.Game.Screens.Edit.Timing
                     // This is run regardless of parsing success as the parsed number may not actually trigger a change
                     // due to bindable clamping. Even in such a case we want to update the textbox to a sane visual state.
                     beatLengthBindable.TriggerChange();
+                    OnCommit?.Invoke(oldBeatLength, beatLengthBindable.Value);
                 };
 
                 beatLengthBindable.BindValueChanged(val =>
@@ -100,51 +143,6 @@ namespace osu.Game.Screens.Edit.Timing
                     beatLengthBindable.UnbindBindings();
                     beatLengthBindable.BindTo(value);
                 }
-            }
-        }
-
-        private class BPMSlider : SettingsSlider<double>
-        {
-            private const double sane_minimum = 60;
-            private const double sane_maximum = 240;
-
-            private readonly BindableNumber<double> beatLengthBindable = new TimingControlPoint().BeatLengthBindable;
-
-            private readonly BindableDouble bpmBindable = new BindableDouble(60000 / TimingControlPoint.DEFAULT_BEAT_LENGTH)
-            {
-                MinValue = sane_minimum,
-                MaxValue = sane_maximum,
-            };
-
-            public BPMSlider()
-            {
-                beatLengthBindable.BindValueChanged(beatLength => updateCurrent(beatLengthToBpm(beatLength.NewValue)), true);
-                bpmBindable.BindValueChanged(bpm => beatLengthBindable.Value = beatLengthToBpm(bpm.NewValue));
-
-                base.Current = bpmBindable;
-
-                TransferValueOnCommit = true;
-            }
-
-            public override Bindable<double> Current
-            {
-                get => base.Current;
-                set
-                {
-                    // incoming will be beat length, not bpm
-                    beatLengthBindable.UnbindBindings();
-                    beatLengthBindable.BindTo(value);
-                }
-            }
-
-            private void updateCurrent(double newValue)
-            {
-                // we use a more sane range for the slider display unless overridden by the user.
-                // if a value comes in outside our range, we should expand temporarily.
-                bpmBindable.MinValue = Math.Min(newValue, sane_minimum);
-                bpmBindable.MaxValue = Math.Max(newValue, sane_maximum);
-
-                bpmBindable.Value = newValue;
             }
         }
 

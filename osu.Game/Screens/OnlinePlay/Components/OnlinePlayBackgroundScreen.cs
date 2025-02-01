@@ -3,34 +3,20 @@
 
 using System.Threading;
 using osu.Framework.Allocation;
-using osu.Framework.Extensions.Color4Extensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Colour;
-using osu.Framework.Graphics.Shapes;
 using osu.Framework.Screens;
+using osu.Game.Beatmaps;
 using osu.Game.Online.Rooms;
 using osuTK;
 using osuTK.Graphics;
 
-#nullable enable
-
 namespace osu.Game.Screens.OnlinePlay.Components
 {
-    public abstract class OnlinePlayBackgroundScreen : BackgroundScreen
+    public abstract partial class OnlinePlayBackgroundScreen : BackgroundScreen
     {
         private CancellationTokenSource? cancellationSource;
         private PlaylistItemBackground? background;
-
-        protected OnlinePlayBackgroundScreen()
-            : base(false)
-        {
-            AddInternal(new Box
-            {
-                RelativeSizeAxes = Axes.Both,
-                Depth = float.MinValue,
-                Colour = ColourInfo.GradientVertical(Color4.Black.Opacity(0.9f), Color4.Black.Opacity(0.6f))
-            });
-        }
 
         [BackgroundDependencyLoader]
         private void load()
@@ -59,9 +45,12 @@ namespace osu.Game.Screens.OnlinePlay.Components
         {
             Schedule(() =>
             {
-                var beatmap = playlistItem?.Beatmap.Value;
+                var beatmap = playlistItem?.Beatmap;
 
-                if (background?.BeatmapInfo?.BeatmapSet?.OnlineInfo?.Covers?.Cover == beatmap?.BeatmapSet?.OnlineInfo?.Covers?.Cover)
+                string? lastCover = (background?.Beatmap?.BeatmapSet as IBeatmapSetOnlineInfo)?.Covers.Cover;
+                string? newCover = (beatmap?.BeatmapSet as IBeatmapSetOnlineInfo)?.Covers.Cover;
+
+                if (lastCover == newCover)
                     return;
 
                 cancellationSource?.Cancel();
@@ -82,20 +71,21 @@ namespace osu.Game.Screens.OnlinePlay.Components
             }
 
             newBackground.Depth = newDepth;
+            newBackground.Colour = ColourInfo.GradientVertical(new Color4(0.1f, 0.1f, 0.1f, 1f), new Color4(0.4f, 0.4f, 0.4f, 1f));
             newBackground.BlurTo(new Vector2(10));
 
             AddInternal(background = newBackground);
         }
 
-        public override void OnSuspending(IScreen next)
+        public override void OnSuspending(ScreenTransitionEvent e)
         {
-            base.OnSuspending(next);
+            base.OnSuspending(e);
             this.MoveToX(0, TRANSITION_LENGTH);
         }
 
-        public override bool OnExiting(IScreen next)
+        public override bool OnExiting(ScreenExitEvent e)
         {
-            var result = base.OnExiting(next);
+            bool result = base.OnExiting(e);
             this.MoveToX(0);
             return result;
         }

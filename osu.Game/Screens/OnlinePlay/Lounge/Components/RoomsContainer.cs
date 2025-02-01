@@ -4,16 +4,17 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Extensions.ObjectExtensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
 using osu.Framework.Input.Bindings;
 using osu.Framework.Input.Events;
-using osu.Framework.Threading;
-using osu.Game.Extensions;
 using osu.Game.Graphics.Cursor;
 using osu.Game.Input.Bindings;
 using osu.Game.Online.Rooms;
@@ -21,10 +22,10 @@ using osuTK;
 
 namespace osu.Game.Screens.OnlinePlay.Lounge.Components
 {
-    public class RoomsContainer : CompositeDrawable, IKeyBindingHandler<GlobalAction>
+    public partial class RoomsContainer : CompositeDrawable, IKeyBindingHandler<GlobalAction>
     {
-        public readonly Bindable<Room> SelectedRoom = new Bindable<Room>();
-        public readonly Bindable<FilterCriteria> Filter = new Bindable<FilterCriteria>();
+        public readonly Bindable<Room?> SelectedRoom = new Bindable<Room?>();
+        public readonly Bindable<FilterCriteria?> Filter = new Bindable<FilterCriteria?>();
 
         public IReadOnlyList<DrawableRoom> Rooms => roomFlow.FlowingChildren.Cast<DrawableRoom>().ToArray();
 
@@ -32,10 +33,7 @@ namespace osu.Game.Screens.OnlinePlay.Lounge.Components
         private readonly FillFlowContainer<DrawableLoungeRoom> roomFlow;
 
         [Resolved]
-        private IRoomManager roomManager { get; set; }
-
-        [Resolved(CanBeNull = true)]
-        private LoungeSubScreen loungeSubScreen { get; set; }
+        private IRoomManager roomManager { get; set; } = null!;
 
         // handle deselection
         public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) => true;
@@ -69,10 +67,10 @@ namespace osu.Game.Screens.OnlinePlay.Lounge.Components
 
             rooms.BindTo(roomManager.Rooms);
 
-            Filter?.BindValueChanged(criteria => applyFilterCriteria(criteria.NewValue), true);
+            Filter.BindValueChanged(criteria => applyFilterCriteria(criteria.NewValue), true);
         }
 
-        private void applyFilterCriteria(FilterCriteria criteria)
+        private void applyFilterCriteria(FilterCriteria? criteria)
         {
             roomFlow.Children.ForEach(r =>
             {
@@ -82,26 +80,74 @@ namespace osu.Game.Screens.OnlinePlay.Lounge.Components
                 {
                     bool matchingFilter = true;
 
-                    matchingFilter &= r.Room.Playlist.Count == 0 || criteria.Ruleset == null || r.Room.Playlist.Any(i => i.Ruleset.Value.Equals(criteria.Ruleset));
+                    matchingFilter &= criteria.Ruleset == null || r.Room.PlaylistItemStats?.RulesetIDs.Any(id => id == criteria.Ruleset.OnlineID) != false;
+                    matchingFilter &= matchPermissions(r, criteria.Permissions);
 
-                    if (!string.IsNullOrEmpty(criteria.SearchString))
-                        matchingFilter &= r.FilterTerms.Any(term => term.Contains(criteria.SearchString, StringComparison.InvariantCultureIgnoreCase));
+                    // Room name isn't translatable, so ToString() is used here for simplicity.
+                    string[] filterTerms = r.FilterTerms.Select(t => t.ToString()).ToArray();
+                    string[] searchTerms = criteria.SearchString.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    matchingFilter &= searchTerms.All(searchTerm => filterTerms.Any(filterTerm => checkTerm(filterTerm, searchTerm)));
 
                     r.MatchingFilter = matchingFilter;
                 }
             });
+
+            // Lifted from SearchContainer.
+            static bool checkTerm(string haystack, string needle)
+            {
+                int index = 0;
+
+                for (int i = 0; i < needle.Length; i++)
+                {
+                    int found = CultureInfo.InvariantCulture.CompareInfo.IndexOf(haystack, needle[i], index, CompareOptions.OrdinalIgnoreCase);
+                    if (found < 0)
+                        return false;
+
+                    index = found + 1;
+                }
+
+                return true;
+            }
+
+            static bool matchPermissions(DrawableLoungeRoom room, RoomPermissionsFilter accessType)
+            {
+                switch (accessType)
+                {
+                    case RoomPermissionsFilter.All:
+                        return true;
+
+                    case RoomPermissionsFilter.Public:
+                        return !room.Room.HasPassword;
+
+                    case RoomPermissionsFilter.Private:
+                        return room.Room.HasPassword;
+
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(accessType), accessType, $"Unsupported {nameof(RoomPermissionsFilter)} in filter");
+                }
+            }
         }
 
-        private void roomsChanged(object sender, NotifyCollectionChangedEventArgs args)
+        private void roomsChanged(object? sender, NotifyCollectionChangedEventArgs args)
         {
             switch (args.Action)
             {
                 case NotifyCollectionChangedAction.Add:
+                    Debug.Assert(args.NewItems != null);
+
                     addRooms(args.NewItems.Cast<Room>());
                     break;
 
                 case NotifyCollectionChangedAction.Remove:
-                    removeRooms(args.OldItems.Cast<Room>());
+                    Debug.Assert(args.OldItems != null);
+
+                    // clear operations have a separate path that benefits from async disposal,
+                    // since disposing is quite expensive when performed on a high number of drawables synchronously.
+                    if (args.OldItems.Count == roomFlow.Count)
+                        clearRooms();
+                    else
+                        removeRooms(args.OldItems.Cast<Room>());
+
                     break;
             }
         }
@@ -109,27 +155,41 @@ namespace osu.Game.Screens.OnlinePlay.Lounge.Components
         private void addRooms(IEnumerable<Room> rooms)
         {
             foreach (var room in rooms)
-                roomFlow.Add(new DrawableLoungeRoom(room) { SelectedRoom = { BindTarget = SelectedRoom } });
+                roomFlow.Add(new DrawableLoungeRoom(room) { SelectedRoom = SelectedRoom });
 
-            applyFilterCriteria(Filter?.Value);
+            applyFilterCriteria(Filter.Value);
         }
 
         private void removeRooms(IEnumerable<Room> rooms)
         {
             foreach (var r in rooms)
             {
-                roomFlow.RemoveAll(d => d.Room == r);
+                roomFlow.RemoveAll(d => d.Room == r, true);
 
                 // selection may have a lease due to being in a sub screen.
-                if (!SelectedRoom.Disabled)
+                if (SelectedRoom.Value == r && !SelectedRoom.Disabled)
                     SelectedRoom.Value = null;
             }
+        }
+
+        private void clearRooms()
+        {
+            roomFlow.Clear();
+
+            // selection may have a lease due to being in a sub screen.
+            if (!SelectedRoom.Disabled)
+                SelectedRoom.Value = null;
         }
 
         private void updateSorting()
         {
             foreach (var room in roomFlow)
-                roomFlow.SetLayoutPosition(room, room.Room.Position.Value);
+            {
+                roomFlow.SetLayoutPosition(room, room.Room.Category > RoomCategory.Normal
+                    // Always show spotlight playlists at the top of the listing.
+                    ? float.MinValue
+                    : -(room.Room.RoomID ?? 0));
+            }
         }
 
         protected override bool OnClick(ClickEvent e)
@@ -139,18 +199,18 @@ namespace osu.Game.Screens.OnlinePlay.Lounge.Components
             return base.OnClick(e);
         }
 
-        #region Key selection logic (shared with BeatmapCarousel)
+        #region Key selection logic (shared with BeatmapCarousel and DrawableRoomPlaylist)
 
         public bool OnPressed(KeyBindingPressEvent<GlobalAction> e)
         {
             switch (e.Action)
             {
                 case GlobalAction.SelectNext:
-                    beginRepeatSelection(() => selectNext(1), e.Action);
+                    selectNext(1);
                     return true;
 
                 case GlobalAction.SelectPrevious:
-                    beginRepeatSelection(() => selectNext(-1), e.Action);
+                    selectNext(-1);
                     return true;
             }
 
@@ -159,40 +219,6 @@ namespace osu.Game.Screens.OnlinePlay.Lounge.Components
 
         public void OnReleased(KeyBindingReleaseEvent<GlobalAction> e)
         {
-            switch (e.Action)
-            {
-                case GlobalAction.SelectNext:
-                case GlobalAction.SelectPrevious:
-                    endRepeatSelection(e.Action);
-                    break;
-            }
-        }
-
-        private ScheduledDelegate repeatDelegate;
-        private object lastRepeatSource;
-
-        /// <summary>
-        /// Begin repeating the specified selection action.
-        /// </summary>
-        /// <param name="action">The action to perform.</param>
-        /// <param name="source">The source of the action. Used in conjunction with <see cref="endRepeatSelection"/> to only cancel the correct action (most recently pressed key).</param>
-        private void beginRepeatSelection(Action action, object source)
-        {
-            endRepeatSelection();
-
-            lastRepeatSource = source;
-            repeatDelegate = this.BeginKeyRepeat(Scheduler, action);
-        }
-
-        private void endRepeatSelection(object source = null)
-        {
-            // only the most recent source should be able to cancel the current action.
-            if (source != null && !EqualityComparer<object>.Default.Equals(lastRepeatSource, source))
-                return;
-
-            repeatDelegate?.Cancel();
-            repeatDelegate = null;
-            lastRepeatSource = null;
         }
 
         private void selectNext(int direction)
@@ -202,7 +228,7 @@ namespace osu.Game.Screens.OnlinePlay.Lounge.Components
 
             var visibleRooms = Rooms.AsEnumerable().Where(r => r.IsPresent);
 
-            Room room;
+            Room? room;
 
             if (SelectedRoom.Value == null)
                 room = visibleRooms.FirstOrDefault()?.Room;
@@ -225,7 +251,7 @@ namespace osu.Game.Screens.OnlinePlay.Lounge.Components
         {
             base.Dispose(isDisposing);
 
-            if (roomManager != null)
+            if (roomManager.IsNotNull())
                 roomManager.RoomsUpdated -= updateSorting;
         }
     }

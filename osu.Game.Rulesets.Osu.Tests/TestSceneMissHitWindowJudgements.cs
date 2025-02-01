@@ -1,4 +1,4 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 using System.Collections.Generic;
@@ -12,14 +12,12 @@ using osu.Game.Rulesets.Osu.Objects;
 using osu.Game.Rulesets.Osu.Replays;
 using osu.Game.Rulesets.Osu.Scoring;
 using osu.Game.Rulesets.Scoring;
-using osu.Game.Scoring;
 using osu.Game.Tests.Visual;
-using osu.Game.Users;
 using osuTK;
 
 namespace osu.Game.Rulesets.Osu.Tests
 {
-    public class TestSceneMissHitWindowJudgements : ModTestScene
+    public partial class TestSceneMissHitWindowJudgements : ModTestScene
     {
         protected override Ruleset CreatePlayerRuleset() => new OsuRuleset();
 
@@ -32,13 +30,13 @@ namespace osu.Game.Rulesets.Osu.Tests
             };
 
             var hitWindows = new OsuHitWindows();
-            hitWindows.SetDifficulty(beatmap.BeatmapInfo.BaseDifficulty.OverallDifficulty);
+            hitWindows.SetDifficulty(beatmap.Difficulty.OverallDifficulty);
 
             CreateModTest(new ModTestData
             {
                 Autoplay = false,
                 Mod = new TestAutoMod(),
-                Beatmap = new Beatmap
+                CreateBeatmap = () => new Beatmap
                 {
                     HitObjects = { new HitCircle { Position = new Vector2(256, 192) } }
                 },
@@ -49,29 +47,24 @@ namespace osu.Game.Rulesets.Osu.Tests
         [Test]
         public void TestMissViaNotHitting()
         {
-            var beatmap = new Beatmap
-            {
-                HitObjects = { new HitCircle { Position = new Vector2(256, 192) } }
-            };
-
             var hitWindows = new OsuHitWindows();
-            hitWindows.SetDifficulty(beatmap.BeatmapInfo.BaseDifficulty.OverallDifficulty);
+            hitWindows.SetDifficulty(IBeatmapDifficultyInfo.DEFAULT_DIFFICULTY);
 
             CreateModTest(new ModTestData
             {
                 Autoplay = false,
-                Beatmap = beatmap,
+                CreateBeatmap = () => new Beatmap
+                {
+                    HitObjects = { new HitCircle { Position = new Vector2(256, 192) } }
+                },
                 PassCondition = () => Player.Results.Count > 0 && Player.Results[0].TimeOffset >= hitWindows.WindowFor(HitResult.Meh) && !Player.Results[0].IsHit
             });
         }
 
         private class TestAutoMod : OsuModAutoplay
         {
-            public override Score CreateReplayScore(IBeatmap beatmap, IReadOnlyList<Mod> mods) => new Score
-            {
-                ScoreInfo = new ScoreInfo { User = new User { Username = "Autoplay" } },
-                Replay = new MissingAutoGenerator(beatmap, mods).Generate()
-            };
+            public override ModReplayData CreateReplayData(IBeatmap beatmap, IReadOnlyList<Mod> mods)
+                => new ModReplayData(new MissingAutoGenerator(beatmap, mods).Generate(), new ModCreatedUser { Username = "Autoplay" });
         }
 
         private class MissingAutoGenerator : OsuAutoGeneratorBase

@@ -10,7 +10,7 @@ using osu.Game.Resources.Localisation.Web;
 
 namespace osu.Game.Overlays.BeatmapSet.Scores
 {
-    public class NoScoresPlaceholder : Container
+    public partial class NoScoresPlaceholder : Container
     {
         private readonly SpriteText text;
 

@@ -11,20 +11,20 @@ using osu.Framework.Localisation;
 using osu.Game.Graphics;
 using osu.Game.Graphics.Sprites;
 using osu.Game.Graphics.UserInterface;
+using osu.Game.Online.API.Requests.Responses;
 using osu.Game.Resources.Localisation.Web;
-using osu.Game.Users;
 using osuTK.Graphics;
 
 namespace osu.Game.Overlays.Profile.Header.Components
 {
-    public class LevelProgressBar : CompositeDrawable, IHasTooltip
+    public partial class LevelProgressBar : CompositeDrawable, IHasTooltip
     {
-        public readonly Bindable<User> User = new Bindable<User>();
+        public readonly Bindable<UserProfileData?> User = new Bindable<UserProfileData?>();
 
         public LocalisableString TooltipText { get; }
 
-        private Bar levelProgressBar;
-        private OsuSpriteText levelProgressText;
+        private Bar levelProgressBar = null!;
+        private OsuSpriteText levelProgressText = null!;
 
         public LevelProgressBar()
         {
@@ -56,13 +56,13 @@ namespace osu.Game.Overlays.Profile.Header.Components
                 }
             };
 
-            User.BindValueChanged(user => updateProgress(user.NewValue));
+            User.BindValueChanged(user => updateProgress(user.NewValue?.User));
         }
 
-        private void updateProgress(User user)
+        private void updateProgress(APIUser? user)
         {
             levelProgressBar.Length = user?.Statistics?.Level.Progress / 100f ?? 0;
-            levelProgressText.Text = user?.Statistics?.Level.Progress.ToLocalisableString("0'%'");
+            levelProgressText.Text = user?.Statistics?.Level.Progress.ToLocalisableString("0'%'") ?? default;
         }
     }
 }

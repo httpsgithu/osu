@@ -16,12 +16,12 @@ using Direction = osu.Framework.Graphics.Direction;
 
 namespace osu.Game.Rulesets.Catch.Edit
 {
-    public class CatchSelectionHandler : EditorSelectionHandler
+    public partial class CatchSelectionHandler : EditorSelectionHandler
     {
         protected ScrollingHitObjectContainer HitObjectContainer => (ScrollingHitObjectContainer)playfield.HitObjectContainer;
 
         [Resolved]
-        private Playfield playfield { get; set; }
+        private Playfield playfield { get; set; } = null!;
 
         public override bool HandleMovement(MoveSelectionEvent<HitObject> moveEvent)
         {
@@ -52,36 +52,62 @@ namespace osu.Game.Rulesets.Catch.Edit
             return true;
         }
 
-        public override bool HandleFlip(Direction direction)
+        public override bool HandleFlip(Direction direction, bool flipOverOrigin)
         {
+            if (SelectedItems.Count == 0)
+                return false;
+
+            // This could be implemented in the future if there's a requirement for it.
+            if (direction == Direction.Vertical)
+                return false;
+
             var selectionRange = CatchHitObjectUtils.GetPositionRange(SelectedItems);
 
             bool changed = false;
+
             EditorBeatmap.PerformOnSelection(h =>
             {
                 if (h is CatchHitObject catchObject)
-                    changed |= handleFlip(selectionRange, catchObject);
+                    changed |= handleFlip(selectionRange, catchObject, flipOverOrigin);
             });
+
             return changed;
         }
 
         public override bool HandleReverse()
         {
+            var hitObjects = EditorBeatmap.SelectedHitObjects
+                                          .OfType<CatchHitObject>()
+                                          .OrderBy(obj => obj.StartTime)
+                                          .ToList();
+
             double selectionStartTime = SelectedItems.Min(h => h.StartTime);
             double selectionEndTime = SelectedItems.Max(h => h.GetEndTime());
 
-            EditorBeatmap.PerformOnSelection(hitObject =>
-            {
-                hitObject.StartTime = selectionEndTime - (hitObject.GetEndTime() - selectionStartTime);
+            // the expectation is that even if the objects themselves are reversed temporally,
+            // the position of new combos in the selection should remain the same.
+            // preserve it for later before doing the reversal.
+            var newComboOrder = hitObjects.Select(obj => obj.NewCombo).ToList();
 
-                if (hitObject is JuiceStream juiceStream)
+            foreach (var h in hitObjects)
+            {
+                h.StartTime = selectionEndTime - (h.GetEndTime() - selectionStartTime);
+
+                if (h is JuiceStream juiceStream)
                 {
                     juiceStream.Path.Reverse(out Vector2 positionalOffset);
                     juiceStream.OriginalX += positionalOffset.X;
                     juiceStream.LegacyConvertedY += positionalOffset.Y;
                     EditorBeatmap.Update(juiceStream);
                 }
-            });
+            }
+
+            // re-order objects by start time again after reversing, and restore new combo flag positioning
+            hitObjects = hitObjects.OrderBy(obj => obj.StartTime).ToList();
+
+            for (int i = 0; i < hitObjects.Count; ++i)
+                hitObjects[i].NewCombo = newComboOrder[i];
+
             return true;
         }
 
@@ -116,15 +142,15 @@ namespace osu.Game.Rulesets.Catch.Edit
             return Math.Clamp(deltaX, lowerBound, upperBound);
         }
 
-        private bool handleFlip(PositionRange selectionRange, CatchHitObject hitObject)
+        private bool handleFlip(PositionRange selectionRange, CatchHitObject hitObject, bool flipOverOrigin)
         {
             switch (hitObject)
             {
-                case BananaShower _:
+                case BananaShower:
                     return false;
 
                 case JuiceStream juiceStream:
-                    juiceStream.OriginalX = selectionRange.GetFlippedPosition(juiceStream.OriginalX);
+                    juiceStream.OriginalX = getFlippedPosition(juiceStream.OriginalX);
 
                     foreach (var point in juiceStream.Path.ControlPoints)
                         point.Position *= new Vector2(-1, 1);
@@ -133,9 +159,11 @@ namespace osu.Game.Rulesets.Catch.Edit
                     return true;
 
                 default:
-                    hitObject.OriginalX = selectionRange.GetFlippedPosition(hitObject.OriginalX);
+                    hitObject.OriginalX = getFlippedPosition(hitObject.OriginalX);
                     return true;
             }
+
+            float getFlippedPosition(float original) => flipOverOrigin ? CatchPlayfield.WIDTH - original : selectionRange.GetFlippedPosition(original);
         }
     }
 }

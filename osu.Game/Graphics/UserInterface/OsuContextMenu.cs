@@ -3,7 +3,6 @@
 
 using osuTK.Graphics;
 using osu.Framework.Allocation;
-using osu.Framework.Audio;
 using osu.Framework.Extensions.Color4Extensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Effects;
@@ -11,12 +10,12 @@ using osu.Framework.Graphics.UserInterface;
 
 namespace osu.Game.Graphics.UserInterface
 {
-    public class OsuContextMenu : OsuMenu
+    public partial class OsuContextMenu : OsuMenu
     {
         private const int fade_duration = 250;
 
         [Resolved]
-        private OsuContextMenuSamples samples { get; set; }
+        private OsuMenuSamples menuSamples { get; set; } = null!;
 
         // todo: this shouldn't be required after https://github.com/ppy/osu-framework/issues/4519 is fixed.
         private bool wasOpened;
@@ -41,22 +40,21 @@ namespace osu.Game.Graphics.UserInterface
         }
 
         [BackgroundDependencyLoader]
-        private void load(OsuColour colours, AudioManager audio)
+        private void load(OsuColour colours)
         {
             BackgroundColour = colours.ContextMenuGray;
         }
 
         protected override void AnimateOpen()
         {
+            wasOpened = true;
             this.FadeIn(fade_duration, Easing.OutQuint);
 
-            if (playClickSample)
-                samples.PlayClickSample();
+            if (!playClickSample)
+                return;
 
-            if (!wasOpened)
-                samples.PlayOpenSample();
-
-            wasOpened = true;
+            menuSamples.PlayClickSample();
+            menuSamples.PlayOpenSample();
         }
 
         protected override void AnimateClose()
@@ -64,7 +62,7 @@ namespace osu.Game.Graphics.UserInterface
             this.FadeOut(fade_duration, Easing.OutQuint);
 
             if (wasOpened)
-                samples.PlayCloseSample();
+                menuSamples.PlayCloseSample();
 
             wasOpened = false;
         }

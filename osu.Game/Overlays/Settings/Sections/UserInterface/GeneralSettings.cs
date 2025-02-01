@@ -10,9 +10,9 @@ using osu.Game.Localisation;
 
 namespace osu.Game.Overlays.Settings.Sections.UserInterface
 {
-    public class GeneralSettings : SettingsSubsection
+    public partial class GeneralSettings : SettingsSubsection
     {
-        protected override LocalisableString Header => UserInterfaceStrings.GeneralHeader;
+        protected override LocalisableString Header => CommonStrings.General;
 
         [BackgroundDependencyLoader]
         private void load(OsuConfigManager config)
@@ -24,7 +24,7 @@ namespace osu.Game.Overlays.Settings.Sections.UserInterface
                     LabelText = UserInterfaceStrings.CursorRotation,
                     Current = config.GetBindable<bool>(OsuSetting.CursorRotation)
                 },
-                new SettingsSlider<float, SizeSlider>
+                new SettingsSlider<float, SizeSlider<float>>
                 {
                     LabelText = UserInterfaceStrings.MenuCursorSize,
                     Current = config.GetBindable<float>(OsuSetting.MenuCursorSize),
@@ -35,18 +35,15 @@ namespace osu.Game.Overlays.Settings.Sections.UserInterface
                     LabelText = UserInterfaceStrings.Parallax,
                     Current = config.GetBindable<bool>(OsuSetting.MenuParallax)
                 },
-                new SettingsSlider<float, TimeSlider>
+                new SettingsSlider<double, TimeSlider>
                 {
+                    ClassicDefault = 0,
                     LabelText = UserInterfaceStrings.HoldToConfirmActivationTime,
-                    Current = config.GetBindable<float>(OsuSetting.UIHoldActivationDelay),
+                    Current = config.GetBindable<double>(OsuSetting.UIHoldActivationDelay),
+                    Keywords = new[] { @"delay" },
                     KeyboardStep = 50
                 },
             };
-        }
-
-        private class TimeSlider : OsuSliderBar<float>
-        {
-            public override LocalisableString TooltipText => Current.Value.ToString(@"N0") + "ms";
         }
     }
 }

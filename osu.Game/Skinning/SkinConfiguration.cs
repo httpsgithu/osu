@@ -14,10 +14,32 @@ namespace osu.Game.Skinning
     {
         public readonly SkinInfo SkinInfo = new SkinInfo();
 
+        public const decimal LATEST_VERSION = 2.7m;
+
         /// <summary>
         /// Whether to allow <see cref="DefaultComboColours"/> as a fallback list for when no combo colours are provided.
         /// </summary>
         internal bool AllowDefaultComboColoursFallback = true;
+
+        /// <summary>
+        /// Legacy version of this skin.
+        /// </summary>
+        public decimal? LegacyVersion { get; internal set; }
+
+        public enum LegacySetting
+        {
+            Version,
+            ComboPrefix,
+            ComboOverlap,
+            ScorePrefix,
+            ScoreOverlap,
+            HitCirclePrefix,
+            HitCircleOverlap,
+            AnimationFramerate,
+            LayeredHitSounds,
+            AllowSliderBallTint,
+            InputOverlayText,
+        }
 
         public static List<Color4> DefaultComboColours { get; } = new List<Color4>
         {
@@ -29,7 +51,7 @@ namespace osu.Game.Skinning
 
         public List<Color4> CustomComboColours { get; set; } = new List<Color4>();
 
-        public IReadOnlyList<Color4> ComboColours
+        public IReadOnlyList<Color4>? ComboColours
         {
             get
             {
@@ -42,8 +64,6 @@ namespace osu.Game.Skinning
                 return null;
             }
         }
-
-        void IHasComboColours.AddComboColours(params Color4[] colours) => CustomComboColours.AddRange(colours);
 
         public Dictionary<string, Color4> CustomColours { get; } = new Dictionary<string, Color4>();
 

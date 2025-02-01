@@ -1,4 +1,4 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
@@ -11,7 +11,7 @@ using osu.Game.Overlays;
 
 namespace osu.Game.Tests.Visual.Menus
 {
-    public class TestSceneSideOverlays : OsuGameTestScene
+    public partial class TestSceneSideOverlays : OsuGameTestScene
     {
         [SetUpSteps]
         public override void SetUpSteps()
@@ -19,6 +19,10 @@ namespace osu.Game.Tests.Visual.Menus
             base.SetUpSteps();
 
             AddAssert("no screen offset applied", () => Game.ScreenOffsetContainer.X == 0f);
+
+            // avoids mouse interacting with settings overlay.
+            AddStep("move mouse to centre", () => InputManager.MoveMouseTo(Game.ScreenSpaceDrawQuad.Centre));
+
             AddUntilStep("wait for overlays", () => Game.Settings.IsLoaded && Game.Notifications.IsLoaded);
         }
 

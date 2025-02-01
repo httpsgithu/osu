@@ -1,6 +1,8 @@
 ﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using osu.Framework.Graphics;
 using osu.Framework.Input.Events;
 using osu.Framework.Graphics.UserInterface;
@@ -9,6 +11,8 @@ using osu.Framework.Graphics.Containers;
 using osu.Game.Graphics.UserInterface;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
 using osu.Game.Graphics.Sprites;
 using osu.Game.Graphics;
 using osuTK.Graphics;
@@ -16,7 +20,7 @@ using osu.Framework.Localisation;
 
 namespace osu.Game.Overlays
 {
-    public abstract class OverlayStreamItem<T> : TabItem<T>
+    public abstract partial class OverlayStreamItem<T> : TabItem<T>
     {
         public readonly Bindable<T> SelectedItem = new Bindable<T>();
 
@@ -37,16 +41,20 @@ namespace osu.Game.Overlays
         private FillFlowContainer<SpriteText> text;
         private ExpandingBar expandingBar;
 
+        public const float PADDING = 5;
+
         protected OverlayStreamItem(T value)
             : base(value)
         {
             Height = 50;
             Width = 90;
-            Margin = new MarginPadding(5);
+            Margin = new MarginPadding(PADDING);
         }
 
+        private Sample selectSample;
+
         [BackgroundDependencyLoader]
-        private void load(OverlayColourProvider colourProvider, OsuColour colours)
+        private void load(OverlayColourProvider colourProvider, OsuColour colours, AudioManager audio)
         {
             AddRange(new Drawable[]
             {
@@ -83,8 +91,10 @@ namespace osu.Game.Overlays
                     CollapsedSize = 2,
                     Expanded = true
                 },
-                new HoverClickSounds()
+                new HoverSounds(HoverSampleSet.TabSelect)
             });
+
+            selectSample = audio.Samples.Get(@"UI/tabselect-select");
 
             SelectedItem.BindValueChanged(_ => updateState(), true);
         }
@@ -100,6 +110,8 @@ namespace osu.Game.Overlays
         protected override void OnActivated() => updateState();
 
         protected override void OnDeactivated() => updateState();
+
+        protected override void OnActivatedByUser() => selectSample.Play();
 
         protected override bool OnHover(HoverEvent e)
         {

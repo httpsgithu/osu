@@ -9,37 +9,36 @@ using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.UserInterface;
 using osu.Framework.Testing;
+using osu.Game.Online.Rooms;
 using osu.Game.Screens.OnlinePlay.Multiplayer;
 using osu.Game.Screens.Play;
 using osuTK.Input;
 
 namespace osu.Game.Tests.Visual.Multiplayer
 {
-    public class TestSceneGameplayChatDisplay : MultiplayerTestScene
+    public partial class TestSceneGameplayChatDisplay : OsuManualInputManagerTestScene
     {
-        private GameplayChatDisplay chatDisplay;
+        private GameplayChatDisplay chatDisplay = null!;
 
         [Cached(typeof(ILocalUserPlayInfo))]
         private ILocalUserPlayInfo localUserInfo;
 
-        private readonly Bindable<bool> localUserPlaying = new Bindable<bool>();
+        private readonly Bindable<LocalUserPlayingState> playingState = new Bindable<LocalUserPlayingState>();
 
         private TextBox textBox => chatDisplay.ChildrenOfType<TextBox>().First();
 
         public TestSceneGameplayChatDisplay()
         {
             var mockLocalUserInfo = new Mock<ILocalUserPlayInfo>();
-            mockLocalUserInfo.SetupGet(i => i.IsPlaying).Returns(localUserPlaying);
+            mockLocalUserInfo.SetupGet(i => i.PlayingState).Returns(playingState);
 
             localUserInfo = mockLocalUserInfo.Object;
         }
 
         [SetUpSteps]
-        public override void SetUpSteps()
+        public void SetUpSteps()
         {
-            base.SetUpSteps();
-
-            AddStep("load chat display", () => Child = chatDisplay = new GameplayChatDisplay(SelectedRoom.Value)
+            AddStep("load chat display", () => Child = chatDisplay = new GameplayChatDisplay(new Room())
             {
                 Anchor = Anchor.Centre,
                 Origin = Anchor.Centre,
@@ -83,22 +82,34 @@ namespace osu.Game.Tests.Visual.Multiplayer
         }
 
         [Test]
-        public void TestFocusOnTabKeyWhenExpanded()
+        public void TestFocusOnEnterKeyWhenExpanded()
         {
             setLocalUserPlaying(true);
 
             assertChatFocused(false);
-            AddStep("press tab", () => InputManager.Key(Key.Tab));
+            AddStep("press enter", () => InputManager.Key(Key.Enter));
             assertChatFocused(true);
         }
 
         [Test]
-        public void TestFocusOnTabKeyWhenNotExpanded()
+        public void TestFocusLostOnBackKey()
+        {
+            setLocalUserPlaying(true);
+
+            assertChatFocused(false);
+            AddStep("press enter", () => InputManager.Key(Key.Enter));
+            assertChatFocused(true);
+            AddStep("press escape", () => InputManager.Key(Key.Escape));
+            assertChatFocused(false);
+        }
+
+        [Test]
+        public void TestFocusOnEnterKeyWhenNotExpanded()
         {
             AddStep("set not expanded", () => chatDisplay.Expanded.Value = false);
             AddUntilStep("is not visible", () => !chatDisplay.IsPresent);
 
-            AddStep("press tab", () => InputManager.Key(Key.Tab));
+            AddStep("press enter", () => InputManager.Key(Key.Enter));
             assertChatFocused(true);
             AddUntilStep("is visible", () => chatDisplay.IsPresent);
 
@@ -107,25 +118,10 @@ namespace osu.Game.Tests.Visual.Multiplayer
             AddUntilStep("is not visible", () => !chatDisplay.IsPresent);
         }
 
-        [Test]
-        public void TestFocusToggleViaAction()
-        {
-            AddStep("set not expanded", () => chatDisplay.Expanded.Value = false);
-            AddUntilStep("is not visible", () => !chatDisplay.IsPresent);
-
-            AddStep("press tab", () => InputManager.Key(Key.Tab));
-            assertChatFocused(true);
-            AddUntilStep("is visible", () => chatDisplay.IsPresent);
-
-            AddStep("press tab", () => InputManager.Key(Key.Tab));
-            assertChatFocused(false);
-            AddUntilStep("is not visible", () => !chatDisplay.IsPresent);
-        }
-
         private void assertChatFocused(bool isFocused) =>
             AddAssert($"chat {(isFocused ? "focused" : "not focused")}", () => textBox.HasFocus == isFocused);
 
         private void setLocalUserPlaying(bool playing) =>
-            AddStep($"local user {(playing ? "playing" : "not playing")}", () => localUserPlaying.Value = playing);
+            AddStep($"local user {(playing ? "playing" : "not playing")}", () => playingState.Value = playing ? LocalUserPlayingState.Playing : LocalUserPlayingState.NotPlaying);
     }
 }

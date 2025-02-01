@@ -4,7 +4,6 @@
 using System.Diagnostics;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
-using osu.Framework.Extensions.Color4Extensions;
 using osu.Framework.Graphics;
 using osu.Framework.Logging;
 using osu.Framework.Screens;
@@ -19,20 +18,23 @@ using osu.Game.Users;
 namespace osu.Game.Screens.OnlinePlay
 {
     [Cached]
-    public abstract class OnlinePlayScreen : OsuScreen, IHasSubScreenStack
+    public abstract partial class OnlinePlayScreen : OsuScreen, IHasSubScreenStack
     {
         [Cached]
         protected readonly OverlayColourProvider ColourProvider = new OverlayColourProvider(OverlayColourScheme.Plum);
 
-        public override bool CursorVisible => (screenStack?.CurrentScreen as IOnlinePlaySubScreen)?.CursorVisible ?? true;
+        public IScreen CurrentSubScreen => screenStack.CurrentScreen;
+
+        public override bool CursorVisible => (screenStack.CurrentScreen as IOnlinePlaySubScreen)?.CursorVisible ?? true;
 
         // this is required due to PlayerLoader eventually being pushed to the main stack
         // while leases may be taken out by a subscreen.
         public override bool DisallowExternalBeatmapRulesetChanges => true;
 
-        private MultiplayerWaveContainer waves;
-        private LoungeSubScreen loungeSubScreen;
-        private ScreenStack screenStack;
+        protected LoungeSubScreen Lounge { get; private set; } = null!;
+
+        private readonly ScreenStack screenStack = new OnlinePlaySubScreenStack { RelativeSizeAxes = Axes.Both };
+        private OnlinePlayScreenWaveContainer waves = null!;
 
         [Cached(Type = typeof(IRoomManager))]
         protected RoomManager RoomManager { get; private set; }
@@ -40,17 +42,8 @@ namespace osu.Game.Screens.OnlinePlay
         [Cached]
         private readonly OngoingOperationTracker ongoingOperationTracker = new OngoingOperationTracker();
 
-        [Resolved(CanBeNull = true)]
-        private MusicController music { get; set; }
-
         [Resolved]
-        private OsuGameBase game { get; set; }
-
-        [Resolved]
-        protected IAPIProvider API { get; private set; }
-
-        [Resolved(CanBeNull = true)]
-        private OsuLogo logo { get; set; }
+        protected IAPIProvider API { get; private set; } = null!;
 
         protected OnlinePlayScreen()
         {
@@ -67,15 +60,15 @@ namespace osu.Game.Screens.OnlinePlay
         [BackgroundDependencyLoader]
         private void load()
         {
-            InternalChild = waves = new MultiplayerWaveContainer
+            InternalChild = waves = new OnlinePlayScreenWaveContainer
             {
                 RelativeSizeAxes = Axes.Both,
                 Children = new Drawable[]
                 {
-                    screenStack = new OnlinePlaySubScreenStack { RelativeSizeAxes = Axes.Both },
+                    screenStack,
                     new Header(ScreenTitle, screenStack),
                     RoomManager,
-                    ongoingOperationTracker
+                    ongoingOperationTracker,
                 }
             };
         }
@@ -83,10 +76,7 @@ namespace osu.Game.Screens.OnlinePlay
         private void onlineStateChanged(ValueChangedEvent<APIState> state) => Schedule(() =>
         {
             if (state.NewValue != APIState.Online)
-            {
-                Logger.Log("API connection was lost, can't continue with online play", LoggingTarget.Network, LogLevel.Important);
                 Schedule(forcefullyExit);
-            }
         });
 
         protected override void LoadComplete()
@@ -96,7 +86,7 @@ namespace osu.Game.Screens.OnlinePlay
             screenStack.ScreenPushed += screenPushed;
             screenStack.ScreenExited += screenExited;
 
-            screenStack.Push(loungeSubScreen = CreateLounge());
+            screenStack.Push(Lounge = CreateLounge());
 
             apiState.BindTo(API.State);
             apiState.BindValueChanged(onlineStateChanged, true);
@@ -104,55 +94,76 @@ namespace osu.Game.Screens.OnlinePlay
 
         private void forcefullyExit()
         {
+            Logger.Log($"{this} forcefully exiting due to loss of API connection");
+
             // This is temporary since we don't currently have a way to force screens to be exited
+            // See also: `DailyChallenge.forcefullyExit()`
             if (this.IsCurrentScreen())
             {
                 while (this.IsCurrentScreen())
                     this.Exit();
             }
-            else
+            // Also handle the case where a child screen is current (ie. gameplay).
+            else if (this.GetChildScreen() != null)
             {
                 this.MakeCurrent();
                 Schedule(forcefullyExit);
             }
         }
 
-        public override void OnEntering(IScreen last)
+        public override void OnEntering(ScreenTransitionEvent e)
         {
             this.FadeIn();
             waves.Show();
 
-            if (loungeSubScreen.IsCurrentScreen())
-                loungeSubScreen.OnEntering(last);
+            Mods.SetDefault();
+
+            if (Lounge.IsCurrentScreen())
+                Lounge.OnEntering(e);
             else
-                loungeSubScreen.MakeCurrent();
+                Lounge.MakeCurrent();
         }
 
-        public override void OnResuming(IScreen last)
+        public override void OnResuming(ScreenTransitionEvent e)
         {
             this.FadeIn(250);
             this.ScaleTo(1, 250, Easing.OutSine);
 
             Debug.Assert(screenStack.CurrentScreen != null);
-            screenStack.CurrentScreen.OnResuming(last);
 
-            base.OnResuming(last);
+            // if a subscreen was pushed to the nested stack while the stack was not present, this path will proxy `OnResuming()`
+            // to the subscreen before `OnEntering()` can even be called for the subscreen, breaking ordering expectations.
+            // to work around this, do not proxy resume to screens that haven't loaded yet.
+            if ((screenStack.CurrentScreen as Drawable)?.IsLoaded == true)
+                screenStack.CurrentScreen.OnResuming(e);
+
+            base.OnResuming(e);
         }
 
-        public override void OnSuspending(IScreen next)
+        public override void OnSuspending(ScreenTransitionEvent e)
         {
             this.ScaleTo(1.1f, 250, Easing.InSine);
             this.FadeOut(250);
 
             Debug.Assert(screenStack.CurrentScreen != null);
-            screenStack.CurrentScreen.OnSuspending(next);
+
+            // if a subscreen was pushed to the nested stack while the stack was not present, this path will proxy `OnSuspending()`
+            // to the subscreen before `OnEntering()` can even be called for the subscreen, breaking ordering expectations.
+            // to work around this, do not proxy suspend to screens that haven't loaded yet.
+            if ((screenStack.CurrentScreen as Drawable)?.IsLoaded == true)
+                screenStack.CurrentScreen.OnSuspending(e);
         }
 
-        public override bool OnExiting(IScreen next)
+        public override bool OnExiting(ScreenExitEvent e)
         {
-            var subScreen = screenStack.CurrentScreen as Drawable;
-            if (subScreen?.IsLoaded == true && screenStack.CurrentScreen.OnExiting(next))
-                return true;
+            while (screenStack.CurrentScreen != null && screenStack.CurrentScreen is not LoungeSubScreen)
+            {
+                var subScreen = (Screen)screenStack.CurrentScreen;
+                if (subScreen.IsLoaded && subScreen.OnExiting(e))
+                    return true;
+
+                subScreen.Exit();
+            }
 
             RoomManager.PartRoom();
 
@@ -160,7 +171,7 @@ namespace osu.Game.Screens.OnlinePlay
 
             this.Delay(WaveContainer.DISAPPEAR_DURATION).FadeOut();
 
-            base.OnExiting(next);
+            base.OnExiting(e);
             return false;
         }
 
@@ -169,7 +180,7 @@ namespace osu.Game.Screens.OnlinePlay
             if (!(screenStack.CurrentScreen is IOnlinePlaySubScreen onlineSubScreen))
                 return false;
 
-            if (((Drawable)onlineSubScreen).IsLoaded && onlineSubScreen.AllowBackButton && onlineSubScreen.OnBackButton())
+            if (((Drawable)onlineSubScreen).IsLoaded && onlineSubScreen.AllowUserExit && onlineSubScreen.OnBackButton())
                 return true;
 
             if (screenStack.CurrentScreen != null && !(screenStack.CurrentScreen is LoungeSubScreen))
@@ -211,26 +222,11 @@ namespace osu.Game.Screens.OnlinePlay
                 ((IBindable<UserActivity>)Activity).BindTo(newOsuScreen.Activity);
         }
 
-        protected IScreen CurrentSubScreen => screenStack.CurrentScreen;
-
         protected abstract string ScreenTitle { get; }
 
         protected virtual RoomManager CreateRoomManager() => new RoomManager();
 
         protected abstract LoungeSubScreen CreateLounge();
-
-        private class MultiplayerWaveContainer : WaveContainer
-        {
-            protected override bool StartHidden => true;
-
-            public MultiplayerWaveContainer()
-            {
-                FirstWaveColour = Color4Extensions.FromHex(@"654d8c");
-                SecondWaveColour = Color4Extensions.FromHex(@"554075");
-                ThirdWaveColour = Color4Extensions.FromHex(@"44325e");
-                FourthWaveColour = Color4Extensions.FromHex(@"392850");
-            }
-        }
 
         ScreenStack IHasSubScreenStack.SubScreenStack => screenStack;
     }

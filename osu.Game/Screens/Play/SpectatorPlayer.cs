@@ -2,8 +2,10 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using osu.Framework.Allocation;
+using osu.Framework.Extensions.ObjectExtensions;
 using osu.Framework.Graphics;
 using osu.Framework.Screens;
+using osu.Game.Beatmaps;
 using osu.Game.Graphics;
 using osu.Game.Graphics.Sprites;
 using osu.Game.Online.Spectator;
@@ -14,16 +16,24 @@ using osu.Game.Screens.Ranking;
 
 namespace osu.Game.Screens.Play
 {
-    public abstract class SpectatorPlayer : Player
+    public abstract partial class SpectatorPlayer : Player
     {
         [Resolved]
-        protected SpectatorClient SpectatorClient { get; private set; }
+        protected SpectatorClient SpectatorClient { get; private set; } = null!;
 
         private readonly Score score;
 
-        protected override bool CheckModsAllowFailure() => false; // todo: better support starting mid-way through beatmap
+        protected override bool CheckModsAllowFailure()
+        {
+            if (!allowFail)
+                return false;
 
-        protected SpectatorPlayer(Score score, PlayerConfiguration configuration = null)
+            return base.CheckModsAllowFailure();
+        }
+
+        private bool allowFail;
+
+        protected SpectatorPlayer(Score score, PlayerConfiguration? configuration = null)
             : base(configuration)
         {
             this.score = score;
@@ -42,6 +52,26 @@ namespace osu.Game.Screens.Play
             });
         }
 
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            DrawableRuleset.FrameStableClock.WaitingOnFrames.BindValueChanged(waiting =>
+            {
+                if (GameplayClockContainer is MasterGameplayClockContainer master)
+                {
+                    if (master.UserPlaybackRate.Value > 1 && waiting.NewValue)
+                        master.UserPlaybackRate.Value = 1;
+                }
+            }, true);
+        }
+
+        /// <summary>
+        /// Should be called when it is apparent that the player being spectated has failed.
+        /// This will subsequently stop blocking the fail screen from displaying (usually done out of safety).
+        /// </summary>
+        public void AllowFail() => allowFail = true;
+
         protected override void StartGameplay()
         {
             base.StartGameplay();
@@ -53,7 +83,7 @@ namespace osu.Game.Screens.Play
 
         private void userSentFrames(int userId, FrameDataBundle bundle)
         {
-            if (userId != score.ScoreInfo.User.Id)
+            if (userId != score.ScoreInfo.User.OnlineID)
                 return;
 
             if (!LoadedBeatmapSuccessfully)
@@ -66,20 +96,21 @@ namespace osu.Game.Screens.Play
 
             foreach (var frame in bundle.Frames)
             {
-                IConvertibleReplayFrame convertibleFrame = GameplayRuleset.CreateConvertibleReplayFrame();
-                convertibleFrame.FromLegacy(frame, GameplayBeatmap.PlayableBeatmap);
+                IConvertibleReplayFrame convertibleFrame = GameplayState.Ruleset.CreateConvertibleReplayFrame()!;
+                convertibleFrame.FromLegacy(frame, GameplayState.Beatmap);
 
                 var convertedFrame = (ReplayFrame)convertibleFrame;
                 convertedFrame.Time = frame.Time;
+                convertedFrame.Header = frame.Header;
 
                 score.Replay.Frames.Add(convertedFrame);
             }
 
             if (isFirstBundle && score.Replay.Frames.Count > 0)
-                NonFrameStableSeek(score.Replay.Frames[0].Time);
+                SetGameplayStartTime(score.Replay.Frames[0].Time);
         }
 
-        protected override Score CreateScore() => score;
+        protected override Score CreateScore(IBeatmap beatmap) => score;
 
         protected override ResultsScreen CreateResults(ScoreInfo score)
             => new SpectatorResultsScreen(score);
@@ -89,18 +120,18 @@ namespace osu.Game.Screens.Play
             DrawableRuleset?.SetReplayScore(score);
         }
 
-        public override bool OnExiting(IScreen next)
+        public override bool OnExiting(ScreenExitEvent e)
         {
             SpectatorClient.OnNewFrames -= userSentFrames;
 
-            return base.OnExiting(next);
+            return base.OnExiting(e);
         }
 
         protected override void Dispose(bool isDisposing)
         {
             base.Dispose(isDisposing);
 
-            if (SpectatorClient != null)
+            if (SpectatorClient.IsNotNull())
                 SpectatorClient.OnNewFrames -= userSentFrames;
         }
     }
