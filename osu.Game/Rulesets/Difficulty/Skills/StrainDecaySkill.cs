@@ -1,4 +1,4 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
@@ -27,14 +27,14 @@ namespace osu.Game.Rulesets.Difficulty.Skills
         /// <summary>
         /// The current strain level.
         /// </summary>
-        protected double CurrentStrain { get; private set; } = 1;
+        protected double CurrentStrain { get; private set; }
 
         protected StrainDecaySkill(Mod[] mods)
             : base(mods)
         {
         }
 
-        protected override double CalculateInitialStrain(double time) => CurrentStrain * strainDecay(time - Previous[0].StartTime);
+        protected override double CalculateInitialStrain(double time, DifficultyHitObject current) => CurrentStrain * strainDecay(time - current.Previous(0).StartTime);
 
         protected override double StrainValueAt(DifficultyHitObject current)
         {

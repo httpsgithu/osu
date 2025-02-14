@@ -3,79 +3,113 @@
 
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Diagnostics;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
-using JetBrains.Annotations;
 using osu.Framework.Bindables;
+using osu.Framework.Logging;
 using osu.Framework.Platform;
-using osu.Framework.Threading;
 using osu.Game.Beatmaps;
 using osu.Game.Configuration;
 using osu.Game.Database;
-using osu.Game.IO;
 using osu.Game.IO.Archives;
 using osu.Game.Online.API;
 using osu.Game.Overlays.Notifications;
 using osu.Game.Rulesets;
-using osu.Game.Rulesets.Judgements;
 using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring.Legacy;
 
 namespace osu.Game.Scoring
 {
-    public class ScoreManager : IModelManager<ScoreInfo>, IModelFileManager<ScoreInfo, ScoreFileInfo>, IModelDownloader<ScoreInfo>, ICanAcceptFiles, IPresentImports<ScoreInfo>
+    public class ScoreManager : ModelManager<ScoreInfo>, IModelImporter<ScoreInfo>
     {
-        private readonly Scheduler scheduler;
-        private readonly Func<BeatmapDifficultyCache> difficulties;
-        private readonly OsuConfigManager configManager;
-        private readonly ScoreModelManager scoreModelManager;
-        private readonly ScoreModelDownloader scoreModelDownloader;
+        private readonly Func<BeatmapManager> beatmaps;
+        private readonly OsuConfigManager? configManager;
+        private readonly ScoreImporter scoreImporter;
+        private readonly LegacyScoreExporter scoreExporter;
 
-        public ScoreManager(RulesetStore rulesets, Func<BeatmapManager> beatmaps, Storage storage, IAPIProvider api, IDatabaseContextFactory contextFactory, Scheduler scheduler,
-                            IIpcHost importHost = null, Func<BeatmapDifficultyCache> difficulties = null, OsuConfigManager configManager = null)
+        public override bool PauseImports
         {
-            this.scheduler = scheduler;
-            this.difficulties = difficulties;
-            this.configManager = configManager;
-
-            scoreModelManager = new ScoreModelManager(rulesets, beatmaps, storage, contextFactory, importHost);
-            scoreModelDownloader = new ScoreModelDownloader(scoreModelManager, api, importHost);
+            get => base.PauseImports;
+            set
+            {
+                base.PauseImports = value;
+                scoreImporter.PauseImports = value;
+            }
         }
 
-        public Score GetScore(ScoreInfo score) => scoreModelManager.GetScore(score);
+        public ScoreManager(RulesetStore rulesets, Func<BeatmapManager> beatmaps, Storage storage, RealmAccess realm, IAPIProvider api,
+                            OsuConfigManager? configManager = null)
+            : base(storage, realm)
+        {
+            this.beatmaps = beatmaps;
+            this.configManager = configManager;
 
-        public List<ScoreInfo> GetAllUsableScores() => scoreModelManager.GetAllUsableScores();
+            scoreImporter = new ScoreImporter(rulesets, beatmaps, storage, realm, api)
+            {
+                PostNotification = obj => PostNotification?.Invoke(obj)
+            };
 
-        public IEnumerable<ScoreInfo> QueryScores(Expression<Func<ScoreInfo, bool>> query) => scoreModelManager.QueryScores(query);
-
-        public ScoreInfo Query(Expression<Func<ScoreInfo, bool>> query) => scoreModelManager.Query(query);
+            scoreExporter = new LegacyScoreExporter(storage)
+            {
+                PostNotification = obj => PostNotification?.Invoke(obj)
+            };
+        }
 
         /// <summary>
-        /// Orders an array of <see cref="ScoreInfo"/>s by total score.
+        /// Retrieve a <see cref="Score"/> from a given <see cref="IScoreInfo"/>.
         /// </summary>
-        /// <param name="scores">The array of <see cref="ScoreInfo"/>s to reorder.</param>
-        /// <param name="cancellationToken">A <see cref="CancellationToken"/> to cancel the process.</param>
-        /// <returns>The given <paramref name="scores"/> ordered by decreasing total score.</returns>
-        public async Task<ScoreInfo[]> OrderByTotalScoreAsync(ScoreInfo[] scores, CancellationToken cancellationToken = default)
+        /// <param name="scoreInfo">The <see cref="IScoreInfo"/> to convert.</param>
+        /// <returns>The <see cref="Score"/>. Null if the score cannot be found in the database.</returns>
+        /// <remarks>
+        /// The <see cref="IScoreInfo"/> is re-retrieved from the database to ensure all the required data
+        /// for retrieving a replay are present (may have missing properties if it was retrieved from online data).
+        /// </remarks>
+        public Score? GetScore(IScoreInfo scoreInfo)
         {
-            var difficultyCache = difficulties?.Invoke();
+            ScoreInfo? databasedScoreInfo = getDatabasedScoreInfo(scoreInfo);
 
-            if (difficultyCache != null)
+            return databasedScoreInfo == null ? null : scoreImporter.GetScore(databasedScoreInfo);
+        }
+
+        /// <summary>
+        /// Perform a lookup query on available <see cref="ScoreInfo"/>s.
+        /// </summary>
+        /// <param name="query">The query.</param>
+        /// <returns>The first result for the provided query in its detached form, or null if no results were found.</returns>
+        public ScoreInfo? Query(Expression<Func<ScoreInfo, bool>> query)
+        {
+            return Realm.Run(r => r.All<ScoreInfo>().FirstOrDefault(query)?.Detach());
+        }
+
+        private ScoreInfo? getDatabasedScoreInfo(IScoreInfo originalScoreInfo)
+        {
+            ScoreInfo? databasedScoreInfo = null;
+
+            if (originalScoreInfo is ScoreInfo scoreInfo)
             {
-                // Compute difficulties asynchronously first to prevent blocking via the GetTotalScore() call below.
-                foreach (var s in scores)
-                {
-                    await difficultyCache.GetDifficultyAsync(s.Beatmap, s.Ruleset, s.Mods, cancellationToken).ConfigureAwait(false);
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
+                if (scoreInfo.IsManaged)
+                    return scoreInfo.Detach();
+
+                if (!string.IsNullOrEmpty(scoreInfo.Hash))
+                    databasedScoreInfo = Query(s => s.Hash == scoreInfo.Hash);
             }
 
-            // We're calling .Result, but this should not be a blocking call due to the above GetDifficultyAsync() calls.
-            return scores.OrderByDescending(s => GetTotalScoreAsync(s, cancellationToken: cancellationToken).Result)
-                         .ThenBy(s => s.OnlineScoreID)
-                         .ToArray();
+            if (originalScoreInfo.OnlineID > 0)
+                databasedScoreInfo ??= Query(s => s.OnlineID == originalScoreInfo.OnlineID);
+
+            if (originalScoreInfo.LegacyOnlineID > 0)
+                databasedScoreInfo ??= Query(s => s.LegacyOnlineID == originalScoreInfo.LegacyOnlineID);
+
+            if (databasedScoreInfo == null)
+            {
+                Logger.Log("The requested score could not be found locally.", LoggingTarget.Information);
+                return null;
+            }
+
+            return databasedScoreInfo;
         }
 
         /// <summary>
@@ -86,12 +120,7 @@ namespace osu.Game.Scoring
         /// </remarks>
         /// <param name="score">The <see cref="ScoreInfo"/> to retrieve the bindable for.</param>
         /// <returns>The bindable containing the total score.</returns>
-        public Bindable<long> GetBindableTotalScore([NotNull] ScoreInfo score)
-        {
-            var bindable = new TotalScoreBindable(score, this);
-            configManager?.BindWith(OsuSetting.ScoreDisplayMode, bindable.ScoringMode);
-            return bindable;
-        }
+        public Bindable<long> GetBindableTotalScore(ScoreInfo score) => new TotalScoreBindable(score, configManager);
 
         /// <summary>
         /// Retrieves a bindable that represents the formatted total score string of a <see cref="ScoreInfo"/>.
@@ -101,115 +130,24 @@ namespace osu.Game.Scoring
         /// </remarks>
         /// <param name="score">The <see cref="ScoreInfo"/> to retrieve the bindable for.</param>
         /// <returns>The bindable containing the formatted total score string.</returns>
-        public Bindable<string> GetBindableTotalScoreString([NotNull] ScoreInfo score) => new TotalScoreStringBindable(GetBindableTotalScore(score));
-
-        /// <summary>
-        /// Retrieves the total score of a <see cref="ScoreInfo"/> in the given <see cref="ScoringMode"/>.
-        /// The score is returned in a callback that is run on the update thread.
-        /// </summary>
-        /// <param name="score">The <see cref="ScoreInfo"/> to calculate the total score of.</param>
-        /// <param name="callback">The callback to be invoked with the total score.</param>
-        /// <param name="mode">The <see cref="ScoringMode"/> to return the total score as.</param>
-        /// <param name="cancellationToken">A <see cref="CancellationToken"/> to cancel the process.</param>
-        public void GetTotalScore([NotNull] ScoreInfo score, [NotNull] Action<long> callback, ScoringMode mode = ScoringMode.Standardised, CancellationToken cancellationToken = default)
-        {
-            GetTotalScoreAsync(score, mode, cancellationToken)
-                .ContinueWith(s => scheduler.Add(() => callback(s.Result)), TaskContinuationOptions.OnlyOnRanToCompletion);
-        }
-
-        /// <summary>
-        /// Retrieves the total score of a <see cref="ScoreInfo"/> in the given <see cref="ScoringMode"/>.
-        /// </summary>
-        /// <param name="score">The <see cref="ScoreInfo"/> to calculate the total score of.</param>
-        /// <param name="mode">The <see cref="ScoringMode"/> to return the total score as.</param>
-        /// <param name="cancellationToken">A <see cref="CancellationToken"/> to cancel the process.</param>
-        /// <returns>The total score.</returns>
-        public async Task<long> GetTotalScoreAsync([NotNull] ScoreInfo score, ScoringMode mode = ScoringMode.Standardised, CancellationToken cancellationToken = default)
-        {
-            if (score.Beatmap == null)
-                return score.TotalScore;
-
-            int beatmapMaxCombo;
-            double accuracy = score.Accuracy;
-
-            if (score.IsLegacyScore)
-            {
-                if (score.RulesetID == 3)
-                {
-                    // In osu!stable, a full-GREAT score has 100% accuracy in mania. Along with a full combo, the score becomes indistinguishable from a full-PERFECT score.
-                    // To get around this, recalculate accuracy based on the hit statistics.
-                    // Note: This cannot be applied universally to all legacy scores, as some rulesets (e.g. catch) group multiple judgements together.
-                    double maxBaseScore = score.Statistics.Select(kvp => kvp.Value).Sum() * Judgement.ToNumericResult(HitResult.Perfect);
-                    double baseScore = score.Statistics.Select(kvp => Judgement.ToNumericResult(kvp.Key) * kvp.Value).Sum();
-                    if (maxBaseScore > 0)
-                        accuracy = baseScore / maxBaseScore;
-                }
-
-                // This score is guaranteed to be an osu!stable score.
-                // The combo must be determined through either the beatmap's max combo value or the difficulty calculator, as lazer's scoring has changed and the score statistics cannot be used.
-                if (score.Beatmap.MaxCombo != null)
-                    beatmapMaxCombo = score.Beatmap.MaxCombo.Value;
-                else
-                {
-                    if (score.Beatmap.ID == 0 || difficulties == null)
-                    {
-                        // We don't have enough information (max combo) to compute the score, so use the provided score.
-                        return score.TotalScore;
-                    }
-
-                    // We can compute the max combo locally after the async beatmap difficulty computation.
-                    var difficulty = await difficulties().GetDifficultyAsync(score.Beatmap, score.Ruleset, score.Mods, cancellationToken).ConfigureAwait(false);
-                    beatmapMaxCombo = difficulty.MaxCombo;
-                }
-            }
-            else
-            {
-                // This is guaranteed to be a non-legacy score.
-                // The combo must be determined through the score's statistics, as both the beatmap's max combo and the difficulty calculator will provide osu!stable combo values.
-                beatmapMaxCombo = Enum.GetValues(typeof(HitResult)).OfType<HitResult>().Where(r => r.AffectsCombo()).Select(r => score.Statistics.GetValueOrDefault(r)).Sum();
-            }
-
-            if (beatmapMaxCombo == 0)
-                return 0;
-
-            var ruleset = score.Ruleset.CreateInstance();
-            var scoreProcessor = ruleset.CreateScoreProcessor();
-            scoreProcessor.Mods.Value = score.Mods;
-
-            return (long)Math.Round(scoreProcessor.GetScore(mode, beatmapMaxCombo, accuracy, (double)score.MaxCombo / beatmapMaxCombo, score.Statistics));
-        }
+        public Bindable<string> GetBindableTotalScoreString(ScoreInfo score) => new TotalScoreStringBindable(GetBindableTotalScore(score));
 
         /// <summary>
         /// Provides the total score of a <see cref="ScoreInfo"/>. Responds to changes in the currently-selected <see cref="ScoringMode"/>.
         /// </summary>
         private class TotalScoreBindable : Bindable<long>
         {
-            public readonly Bindable<ScoringMode> ScoringMode = new Bindable<ScoringMode>();
-
-            private readonly ScoreInfo score;
-            private readonly ScoreManager scoreManager;
-
-            private CancellationTokenSource difficultyCalculationCancellationSource;
+            private readonly Bindable<ScoringMode> scoringMode = new Bindable<ScoringMode>();
 
             /// <summary>
             /// Creates a new <see cref="TotalScoreBindable"/>.
             /// </summary>
             /// <param name="score">The <see cref="ScoreInfo"/> to provide the total score of.</param>
-            /// <param name="scoreManager">The <see cref="ScoreManager"/>.</param>
-            public TotalScoreBindable(ScoreInfo score, ScoreManager scoreManager)
+            /// <param name="configManager">The config.</param>
+            public TotalScoreBindable(ScoreInfo score, OsuConfigManager? configManager)
             {
-                this.score = score;
-                this.scoreManager = scoreManager;
-
-                ScoringMode.BindValueChanged(onScoringModeChanged, true);
-            }
-
-            private void onScoringModeChanged(ValueChangedEvent<ScoringMode> mode)
-            {
-                difficultyCalculationCancellationSource?.Cancel();
-                difficultyCalculationCancellationSource = new CancellationTokenSource();
-
-                scoreManager.GetTotalScore(score, s => Value = s, mode.NewValue, difficultyCalculationCancellationSource.Token);
+                configManager?.BindWith(OsuSetting.ScoreDisplayMode, scoringMode);
+                scoringMode.BindValueChanged(mode => Value = score.GetDisplayScore(mode.NewValue), true);
             }
         }
 
@@ -228,146 +166,80 @@ namespace osu.Game.Scoring
             }
         }
 
-        #region Implementation of IPostNotifications
-
-        public Action<Notification> PostNotification
+        public void Delete(Expression<Func<ScoreInfo, bool>>? filter = null, bool silent = false)
         {
-            set
+            Realm.Run(r =>
             {
-                scoreModelManager.PostNotification = value;
-                scoreModelDownloader.PostNotification = value;
-            }
+                var items = r.All<ScoreInfo>()
+                             .Where(s => !s.DeletePending);
+
+                if (filter != null)
+                    items = items.Where(filter);
+
+                Delete(items.ToList(), silent);
+            });
         }
 
-        #endregion
-
-        #region Implementation of IModelManager<ScoreInfo>
-
-        public IBindable<WeakReference<ScoreInfo>> ItemUpdated => scoreModelManager.ItemUpdated;
-
-        public IBindable<WeakReference<ScoreInfo>> ItemRemoved => scoreModelManager.ItemRemoved;
-
-        public Task ImportFromStableAsync(StableStorage stableStorage)
+        public void Delete(BeatmapInfo beatmap, bool silent = false)
         {
-            return scoreModelManager.ImportFromStableAsync(stableStorage);
+            Realm.Run(r =>
+            {
+                var beatmapScores = r.Find<BeatmapInfo>(beatmap.ID)!.Scores.ToList();
+                Delete(beatmapScores, silent);
+            });
         }
 
-        public void Export(ScoreInfo item)
+        public Task Import(params string[] paths) => scoreImporter.Import(paths);
+
+        public Task Import(ImportTask[] imports, ImportParameters parameters = default) => scoreImporter.Import(imports, parameters);
+
+        public override bool IsAvailableLocally(ScoreInfo model)
+            => Realm.Run(realm => realm.All<ScoreInfo>()
+                                       // this basically inlines `ModelExtension.MatchesOnlineID(IScoreInfo, IScoreInfo)`,
+                                       // because that method can't be used here, as realm can't translate it to its query language.
+                                       .Any(s => s.OnlineID == model.OnlineID || s.LegacyOnlineID == model.LegacyOnlineID));
+
+        public IEnumerable<string> HandledExtensions => scoreImporter.HandledExtensions;
+
+        public Task<IEnumerable<Live<ScoreInfo>>> Import(ProgressNotification notification, ImportTask[] tasks, ImportParameters parameters = default) => scoreImporter.Import(notification, tasks);
+
+        /// <summary>
+        /// Export a replay from a given <see cref="IScoreInfo"/>.
+        /// </summary>
+        /// <param name="scoreInfo">The <see cref="IScoreInfo"/> to export.</param>
+        /// <returns>The <see cref="Task"/>. Return <see cref="Task.CompletedTask"/> if the score cannot be found in the database.</returns>
+        /// <remarks>
+        /// The <see cref="IScoreInfo"/> is re-retrieved from the database to ensure all the required data
+        /// for exporting a replay are present (may have missing properties if it was retrieved from online data).
+        /// </remarks>
+        public Task Export(ScoreInfo scoreInfo)
         {
-            scoreModelManager.Export(item);
+            ScoreInfo? databasedScoreInfo = getDatabasedScoreInfo(scoreInfo);
+
+            return databasedScoreInfo == null ? Task.CompletedTask : scoreExporter.ExportAsync(databasedScoreInfo.ToLive(Realm));
         }
 
-        public void ExportModelTo(ScoreInfo model, Stream outputStream)
+        public Task<Live<ScoreInfo>?> ImportAsUpdate(ProgressNotification notification, ImportTask task, ScoreInfo original) => scoreImporter.ImportAsUpdate(notification, task, original);
+        public Task<ExternalEditOperation<ScoreInfo>> BeginExternalEditing(ScoreInfo model) => scoreImporter.BeginExternalEditing(model);
+
+        public Live<ScoreInfo>? Import(ScoreInfo item, ArchiveReader? archive = null, ImportParameters parameters = default, CancellationToken cancellationToken = default) =>
+            scoreImporter.ImportModel(item, archive, parameters, cancellationToken);
+
+        /// <summary>
+        /// Populates the <see cref="ScoreInfo.MaximumStatistics"/> for a given <see cref="ScoreInfo"/>.
+        /// </summary>
+        /// <param name="score">The score to populate the statistics of.</param>
+        public void PopulateMaximumStatistics(ScoreInfo score)
         {
-            scoreModelManager.ExportModelTo(model, outputStream);
+            Debug.Assert(score.BeatmapInfo != null);
+            LegacyScoreDecoder.PopulateMaximumStatistics(score, beatmaps().GetWorkingBeatmap(score.BeatmapInfo.Detach()));
         }
-
-        public void Update(ScoreInfo item)
-        {
-            scoreModelManager.Update(item);
-        }
-
-        public bool Delete(ScoreInfo item)
-        {
-            return scoreModelManager.Delete(item);
-        }
-
-        public void Delete(List<ScoreInfo> items, bool silent = false)
-        {
-            scoreModelManager.Delete(items, silent);
-        }
-
-        public void Undelete(List<ScoreInfo> items, bool silent = false)
-        {
-            scoreModelManager.Undelete(items, silent);
-        }
-
-        public void Undelete(ScoreInfo item)
-        {
-            scoreModelManager.Undelete(item);
-        }
-
-        public Task Import(params string[] paths)
-        {
-            return scoreModelManager.Import(paths);
-        }
-
-        public Task Import(params ImportTask[] tasks)
-        {
-            return scoreModelManager.Import(tasks);
-        }
-
-        public IEnumerable<string> HandledExtensions => scoreModelManager.HandledExtensions;
-
-        public Task<IEnumerable<ScoreInfo>> Import(ProgressNotification notification, params ImportTask[] tasks)
-        {
-            return scoreModelManager.Import(notification, tasks);
-        }
-
-        public Task<ScoreInfo> Import(ImportTask task, bool lowPriority = false, CancellationToken cancellationToken = default)
-        {
-            return scoreModelManager.Import(task, lowPriority, cancellationToken);
-        }
-
-        public Task<ScoreInfo> Import(ArchiveReader archive, bool lowPriority = false, CancellationToken cancellationToken = default)
-        {
-            return scoreModelManager.Import(archive, lowPriority, cancellationToken);
-        }
-
-        public Task<ScoreInfo> Import(ScoreInfo item, ArchiveReader archive = null, bool lowPriority = false, CancellationToken cancellationToken = default)
-        {
-            return scoreModelManager.Import(item, archive, lowPriority, cancellationToken);
-        }
-
-        public bool IsAvailableLocally(ScoreInfo model)
-        {
-            return scoreModelManager.IsAvailableLocally(model);
-        }
-
-        #endregion
-
-        #region Implementation of IModelFileManager<in ScoreInfo,in ScoreFileInfo>
-
-        public void ReplaceFile(ScoreInfo model, ScoreFileInfo file, Stream contents, string filename = null)
-        {
-            scoreModelManager.ReplaceFile(model, file, contents, filename);
-        }
-
-        public void DeleteFile(ScoreInfo model, ScoreFileInfo file)
-        {
-            scoreModelManager.DeleteFile(model, file);
-        }
-
-        public void AddFile(ScoreInfo model, Stream contents, string filename)
-        {
-            scoreModelManager.AddFile(model, contents, filename);
-        }
-
-        #endregion
-
-        #region Implementation of IModelDownloader<ScoreInfo>
-
-        public IBindable<WeakReference<ArchiveDownloadRequest<ScoreInfo>>> DownloadBegan => scoreModelDownloader.DownloadBegan;
-
-        public IBindable<WeakReference<ArchiveDownloadRequest<ScoreInfo>>> DownloadFailed => scoreModelDownloader.DownloadFailed;
-
-        public bool Download(ScoreInfo model, bool minimiseDownloadSize)
-        {
-            return scoreModelDownloader.Download(model, minimiseDownloadSize);
-        }
-
-        public ArchiveDownloadRequest<ScoreInfo> GetExistingDownload(ScoreInfo model)
-        {
-            return scoreModelDownloader.GetExistingDownload(model);
-        }
-
-        #endregion
 
         #region Implementation of IPresentImports<ScoreInfo>
 
-        public Action<IEnumerable<ScoreInfo>> PresentImport
+        public Action<IEnumerable<Live<ScoreInfo>>>? PresentImport
         {
-            set => scoreModelManager.PresentImport = value;
+            set => scoreImporter.PresentImport = value;
         }
 
         #endregion

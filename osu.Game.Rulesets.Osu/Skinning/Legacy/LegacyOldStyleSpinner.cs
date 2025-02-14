@@ -19,11 +19,11 @@ namespace osu.Game.Rulesets.Osu.Skinning.Legacy
     /// <summary>
     /// Legacy skinned spinner with one main spinning layer and a background layer.
     /// </summary>
-    public class LegacyOldStyleSpinner : LegacySpinner
+    public partial class LegacyOldStyleSpinner : LegacySpinner
     {
-        private Sprite disc;
-        private Sprite metreSprite;
-        private Container metre;
+        private Sprite disc = null!;
+        private Sprite metreSprite = null!;
+        private Container metre = null!;
 
         private bool spinnerBlink;
 
@@ -92,8 +92,8 @@ namespace osu.Game.Rulesets.Osu.Skinning.Legacy
             using (BeginAbsoluteSequence(spinner.StartTime - spinner.TimePreempt))
                 this.FadeOut();
 
-            using (BeginAbsoluteSequence(spinner.StartTime - spinner.TimeFadeIn / 2))
-                this.FadeInFromZero(spinner.TimeFadeIn / 2);
+            using (BeginAbsoluteSequence(spinner.StartTime - spinner.TimeFadeIn))
+                this.FadeInFromZero(spinner.TimeFadeIn);
         }
 
         protected override void Update()
@@ -103,7 +103,7 @@ namespace osu.Game.Rulesets.Osu.Skinning.Legacy
 
             // careful: need to call this exactly once for all calculations in a frame
             // as the function has a random factor in it
-            var metreHeight = getMetreHeight(DrawableSpinner.Progress);
+            float metreHeight = getMetreHeight(DrawableSpinner.Progress);
 
             // hack to make the metre blink up from below than down from above.
             // move down the container to be able to apply masking for the metre,

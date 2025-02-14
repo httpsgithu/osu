@@ -1,6 +1,8 @@
 ﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using System.IO;
 using System.Linq;
 using DeepEqual.Syntax;
@@ -31,11 +33,11 @@ namespace osu.Game.Tests.Beatmaps.Formats
         {
             var beatmap = decodeAsJson(normal);
             var meta = beatmap.BeatmapInfo.Metadata;
-            Assert.AreEqual(241526, beatmap.BeatmapInfo.BeatmapSet.OnlineBeatmapSetID);
+            Assert.AreEqual(241526, beatmap.BeatmapInfo.BeatmapSet?.OnlineID);
             Assert.AreEqual("Soleily", meta.Artist);
             Assert.AreEqual("Soleily", meta.ArtistUnicode);
             Assert.AreEqual("03. Renatus - Soleily 192kbps.mp3", meta.AudioFile);
-            Assert.AreEqual("Gamu", meta.AuthorString);
+            Assert.AreEqual("Gamu", meta.Author.Username);
             Assert.AreEqual("machinetop_background.jpg", meta.BackgroundFile);
             Assert.AreEqual(164471, meta.PreviewTime);
             Assert.AreEqual(string.Empty, meta.Source);
@@ -49,14 +51,14 @@ namespace osu.Game.Tests.Beatmaps.Formats
         {
             var beatmap = decodeAsJson(normal);
             var beatmapInfo = beatmap.BeatmapInfo;
-            Assert.AreEqual(0, beatmapInfo.AudioLeadIn);
-            Assert.AreEqual(0.7f, beatmapInfo.StackLeniency);
-            Assert.AreEqual(false, beatmapInfo.SpecialStyle);
-            Assert.IsTrue(beatmapInfo.RulesetID == 0);
-            Assert.AreEqual(false, beatmapInfo.LetterboxInBreaks);
-            Assert.AreEqual(false, beatmapInfo.WidescreenStoryboard);
-            Assert.AreEqual(CountdownType.None, beatmapInfo.Countdown);
-            Assert.AreEqual(0, beatmapInfo.CountdownOffset);
+            Assert.AreEqual(0, beatmap.AudioLeadIn);
+            Assert.AreEqual(0.7f, beatmap.StackLeniency);
+            Assert.AreEqual(false, beatmap.SpecialStyle);
+            Assert.IsTrue(beatmapInfo.Ruleset.OnlineID == 0);
+            Assert.AreEqual(false, beatmap.LetterboxInBreaks);
+            Assert.AreEqual(false, beatmap.WidescreenStoryboard);
+            Assert.AreEqual(CountdownType.None, beatmap.Countdown);
+            Assert.AreEqual(0, beatmap.CountdownOffset);
         }
 
         [Test]
@@ -71,20 +73,20 @@ namespace osu.Game.Tests.Beatmaps.Formats
                 95901, 106450, 116999, 119637, 130186, 140735, 151285,
                 161834, 164471, 175020, 185570, 196119, 206669, 209306
             };
-            Assert.AreEqual(expectedBookmarks.Length, beatmapInfo.Bookmarks.Length);
+            Assert.AreEqual(expectedBookmarks.Length, beatmap.Bookmarks.Length);
             for (int i = 0; i < expectedBookmarks.Length; i++)
-                Assert.AreEqual(expectedBookmarks[i], beatmapInfo.Bookmarks[i]);
-            Assert.AreEqual(1.8, beatmapInfo.DistanceSpacing);
+                Assert.AreEqual(expectedBookmarks[i], beatmap.Bookmarks[i]);
+            Assert.AreEqual(1.8, beatmap.DistanceSpacing);
             Assert.AreEqual(4, beatmapInfo.BeatDivisor);
-            Assert.AreEqual(4, beatmapInfo.GridSize);
-            Assert.AreEqual(2, beatmapInfo.TimelineZoom);
+            Assert.AreEqual(4, beatmap.GridSize);
+            Assert.AreEqual(2, beatmap.TimelineZoom);
         }
 
         [Test]
         public void TestDecodeDifficulty()
         {
             var beatmap = decodeAsJson(normal);
-            var difficulty = beatmap.BeatmapInfo.BaseDifficulty;
+            var difficulty = beatmap.Difficulty;
             Assert.AreEqual(6.5f, difficulty.DrainRate);
             Assert.AreEqual(4, difficulty.CircleSize);
             Assert.AreEqual(8, difficulty.OverallDifficulty);
@@ -102,7 +104,7 @@ namespace osu.Game.Tests.Beatmaps.Formats
 
             processor.PreProcess();
             foreach (var o in converted.HitObjects)
-                o.ApplyDefaults(converted.ControlPointInfo, converted.BeatmapInfo.BaseDifficulty);
+                o.ApplyDefaults(converted.ControlPointInfo, converted.Difficulty);
             processor.PostProcess();
 
             var beatmap = converted.Serialize().Deserialize<Beatmap>();

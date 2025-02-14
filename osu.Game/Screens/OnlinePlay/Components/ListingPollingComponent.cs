@@ -13,12 +13,12 @@ namespace osu.Game.Screens.OnlinePlay.Components
     /// <summary>
     /// A <see cref="RoomPollingComponent"/> that polls for the lounge listing.
     /// </summary>
-    public class ListingPollingComponent : RoomPollingComponent
+    public partial class ListingPollingComponent : RoomPollingComponent
     {
         public IBindable<bool> InitialRoomsReceived => initialRoomsReceived;
         private readonly Bindable<bool> initialRoomsReceived = new Bindable<bool>();
 
-        public readonly Bindable<FilterCriteria> Filter = new Bindable<FilterCriteria>();
+        public readonly Bindable<FilterCriteria?> Filter = new Bindable<FilterCriteria?>();
 
         [BackgroundDependencyLoader]
         private void load()
@@ -33,7 +33,7 @@ namespace osu.Game.Screens.OnlinePlay.Components
             });
         }
 
-        private GetRoomsRequest pollReq;
+        private GetRoomsRequest? lastPollRequest;
 
         protected override Task Poll()
         {
@@ -45,31 +45,32 @@ namespace osu.Game.Screens.OnlinePlay.Components
 
             var tcs = new TaskCompletionSource<bool>();
 
-            pollReq?.Cancel();
-            pollReq = new GetRoomsRequest(Filter.Value.Status, Filter.Value.Category);
+            lastPollRequest?.Cancel();
 
-            pollReq.Success += result =>
+            var req = new GetRoomsRequest(Filter.Value);
+
+            req.Success += result =>
             {
+                result = result.Where(r => r.Category != RoomCategory.DailyChallenge).ToList();
+
                 foreach (var existing in RoomManager.Rooms.ToArray())
                 {
-                    if (result.All(r => r.RoomID.Value != existing.RoomID.Value))
+                    if (result.All(r => r.RoomID != existing.RoomID))
                         RoomManager.RemoveRoom(existing);
                 }
 
                 foreach (var incoming in result)
-                {
-                    incoming.RemoveExpiredPlaylistItems();
                     RoomManager.AddOrUpdateRoom(incoming);
-                }
 
                 initialRoomsReceived.Value = true;
                 tcs.SetResult(true);
             };
 
-            pollReq.Failure += _ => tcs.SetResult(false);
+            req.Failure += _ => tcs.SetResult(false);
 
-            API.Queue(pollReq);
+            API.Queue(req);
 
+            lastPollRequest = req;
             return tcs.Task;
         }
     }

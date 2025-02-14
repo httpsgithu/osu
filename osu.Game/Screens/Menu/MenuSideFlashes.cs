@@ -1,8 +1,12 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using osuTK.Graphics;
+#nullable disable
+
+using System;
 using osu.Framework.Allocation;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
 using osu.Framework.Extensions.Color4Extensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Colour;
@@ -11,17 +15,19 @@ using osu.Game.Beatmaps;
 using osu.Game.Beatmaps.ControlPoints;
 using osu.Game.Graphics;
 using osu.Game.Graphics.Containers;
-using osu.Game.Skinning;
 using osu.Game.Online.API;
-using osu.Game.Users;
-using System;
-using osu.Framework.Audio.Track;
-using osu.Framework.Bindables;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Skinning;
+using osuTK.Graphics;
 
 namespace osu.Game.Screens.Menu
 {
-    public class MenuSideFlashes : BeatSyncedContainer
+    public partial class MenuSideFlashes : BeatSyncedContainer
     {
+        protected virtual bool RefreshColoursEveryFlash => false;
+
+        protected virtual float Intensity => 2;
+
         private readonly IBindable<WorkingBeatmap> beatmap = new Bindable<WorkingBeatmap>();
 
         private Box leftBox;
@@ -35,7 +41,7 @@ namespace osu.Game.Screens.Menu
         private const double box_fade_in_time = 65;
         private const int box_width = 200;
 
-        private IBindable<User> user;
+        private IBindable<APIUser> user;
         private Bindable<Skin> skin;
 
         [Resolved]
@@ -65,7 +71,7 @@ namespace osu.Game.Screens.Menu
                     Anchor = Anchor.CentreLeft,
                     Origin = Anchor.CentreLeft,
                     RelativeSizeAxes = Axes.Y,
-                    Width = box_width * 2,
+                    Width = box_width * Intensity,
                     Height = 1.5f,
                     // align off-screen to make sure our edges don't become visible during parallax.
                     X = -box_width,
@@ -77,7 +83,7 @@ namespace osu.Game.Screens.Menu
                     Anchor = Anchor.CentreRight,
                     Origin = Anchor.CentreRight,
                     RelativeSizeAxes = Axes.Y,
-                    Width = box_width * 2,
+                    Width = box_width * Intensity,
                     Height = 1.5f,
                     X = box_width,
                     Alpha = 0,
@@ -85,8 +91,11 @@ namespace osu.Game.Screens.Menu
                 }
             };
 
-            user.ValueChanged += _ => updateColour();
-            skin.BindValueChanged(_ => updateColour(), true);
+            if (!RefreshColoursEveryFlash)
+            {
+                user.ValueChanged += _ => updateColour();
+                skin.BindValueChanged(_ => updateColour(), true);
+            }
         }
 
         protected override void OnNewBeat(int beatIndex, TimingControlPoint timingPoint, EffectControlPoint effectPoint, ChannelAmplitudes amplitudes)
@@ -94,26 +103,36 @@ namespace osu.Game.Screens.Menu
             if (beatIndex < 0)
                 return;
 
-            if (effectPoint.KiaiMode ? beatIndex % 2 == 0 : beatIndex % (int)timingPoint.TimeSignature == 0)
+            if (effectPoint.KiaiMode ? beatIndex % 2 == 0 : beatIndex % timingPoint.TimeSignature.Numerator == 0)
                 flash(leftBox, timingPoint.BeatLength, effectPoint.KiaiMode, amplitudes);
-            if (effectPoint.KiaiMode ? beatIndex % 2 == 1 : beatIndex % (int)timingPoint.TimeSignature == 0)
+            if (effectPoint.KiaiMode ? beatIndex % 2 == 1 : beatIndex % timingPoint.TimeSignature.Numerator == 0)
                 flash(rightBox, timingPoint.BeatLength, effectPoint.KiaiMode, amplitudes);
         }
 
         private void flash(Drawable d, double beatLength, bool kiai, ChannelAmplitudes amplitudes)
         {
-            d.FadeTo(Math.Max(0, ((ReferenceEquals(d, leftBox) ? amplitudes.LeftChannel : amplitudes.RightChannel) - amplitude_dead_zone) / (kiai ? kiai_multiplier : alpha_multiplier)), box_fade_in_time)
+            if (RefreshColoursEveryFlash)
+                updateColour();
+
+            d.FadeTo(Math.Clamp(0.1f + ((ReferenceEquals(d, leftBox) ? amplitudes.LeftChannel : amplitudes.RightChannel) - amplitude_dead_zone) / (kiai ? kiai_multiplier : alpha_multiplier), 0.1f, 1),
+                 box_fade_in_time)
              .Then()
              .FadeOut(beatLength, Easing.In);
         }
 
-        private void updateColour()
+        protected virtual Color4 GetBaseColour()
         {
             Color4 baseColour = colours.Blue;
 
             if (user.Value?.IsSupporter ?? false)
                 baseColour = skin.Value.GetConfig<GlobalSkinColours, Color4>(GlobalSkinColours.MenuGlow)?.Value ?? baseColour;
 
+            return baseColour;
+        }
+
+        private void updateColour()
+        {
+            var baseColour = GetBaseColour();
             // linear colour looks better in this case, so let's use it for now.
             Color4 gradientDark = baseColour.Opacity(0).ToLinear();
             Color4 gradientLight = baseColour.Opacity(0.6f).ToLinear();

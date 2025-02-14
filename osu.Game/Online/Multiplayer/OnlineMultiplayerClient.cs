@@ -1,25 +1,26 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-#nullable enable
-
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
-using osu.Game.Beatmaps;
 using osu.Game.Online.API;
-using osu.Game.Online.API.Requests;
 using osu.Game.Online.Rooms;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Localisation;
 
 namespace osu.Game.Online.Multiplayer
 {
     /// <summary>
     /// A <see cref="MultiplayerClient"/> with online connectivity.
     /// </summary>
-    public class OnlineMultiplayerClient : MultiplayerClient
+    public partial class OnlineMultiplayerClient : MultiplayerClient
     {
         private readonly string endpoint;
 
@@ -31,7 +32,7 @@ namespace osu.Game.Online.Multiplayer
 
         public OnlineMultiplayerClient(EndpointConfiguration endpoints)
         {
-            endpoint = endpoints.MultiplayerEndpointUrl;
+            endpoint = endpoints.MultiplayerUrl;
         }
 
         [BackgroundDependencyLoader]
@@ -51,29 +52,53 @@ namespace osu.Game.Online.Multiplayer
                     connection.On<MultiplayerRoomUser>(nameof(IMultiplayerClient.UserJoined), ((IMultiplayerClient)this).UserJoined);
                     connection.On<MultiplayerRoomUser>(nameof(IMultiplayerClient.UserLeft), ((IMultiplayerClient)this).UserLeft);
                     connection.On<MultiplayerRoomUser>(nameof(IMultiplayerClient.UserKicked), ((IMultiplayerClient)this).UserKicked);
+                    connection.On<int, long, string>(nameof(IMultiplayerClient.Invited), ((IMultiplayerClient)this).Invited);
                     connection.On<int>(nameof(IMultiplayerClient.HostChanged), ((IMultiplayerClient)this).HostChanged);
                     connection.On<MultiplayerRoomSettings>(nameof(IMultiplayerClient.SettingsChanged), ((IMultiplayerClient)this).SettingsChanged);
                     connection.On<int, MultiplayerUserState>(nameof(IMultiplayerClient.UserStateChanged), ((IMultiplayerClient)this).UserStateChanged);
                     connection.On(nameof(IMultiplayerClient.LoadRequested), ((IMultiplayerClient)this).LoadRequested);
-                    connection.On(nameof(IMultiplayerClient.MatchStarted), ((IMultiplayerClient)this).MatchStarted);
+                    connection.On(nameof(IMultiplayerClient.GameplayStarted), ((IMultiplayerClient)this).GameplayStarted);
+                    connection.On<GameplayAbortReason>(nameof(IMultiplayerClient.GameplayAborted), ((IMultiplayerClient)this).GameplayAborted);
                     connection.On(nameof(IMultiplayerClient.ResultsReady), ((IMultiplayerClient)this).ResultsReady);
+                    connection.On<int, int?, int?>(nameof(IMultiplayerClient.UserStyleChanged), ((IMultiplayerClient)this).UserStyleChanged);
                     connection.On<int, IEnumerable<APIMod>>(nameof(IMultiplayerClient.UserModsChanged), ((IMultiplayerClient)this).UserModsChanged);
                     connection.On<int, BeatmapAvailability>(nameof(IMultiplayerClient.UserBeatmapAvailabilityChanged), ((IMultiplayerClient)this).UserBeatmapAvailabilityChanged);
                     connection.On<MatchRoomState>(nameof(IMultiplayerClient.MatchRoomStateChanged), ((IMultiplayerClient)this).MatchRoomStateChanged);
                     connection.On<int, MatchUserState>(nameof(IMultiplayerClient.MatchUserStateChanged), ((IMultiplayerClient)this).MatchUserStateChanged);
                     connection.On<MatchServerEvent>(nameof(IMultiplayerClient.MatchEvent), ((IMultiplayerClient)this).MatchEvent);
+                    connection.On<MultiplayerPlaylistItem>(nameof(IMultiplayerClient.PlaylistItemAdded), ((IMultiplayerClient)this).PlaylistItemAdded);
+                    connection.On<long>(nameof(IMultiplayerClient.PlaylistItemRemoved), ((IMultiplayerClient)this).PlaylistItemRemoved);
+                    connection.On<MultiplayerPlaylistItem>(nameof(IMultiplayerClient.PlaylistItemChanged), ((IMultiplayerClient)this).PlaylistItemChanged);
+                    connection.On(nameof(IStatefulUserHubClient.DisconnectRequested), ((IMultiplayerClient)this).DisconnectRequested);
                 };
 
                 IsConnected.BindTo(connector.IsConnected);
             }
         }
 
-        protected override Task<MultiplayerRoom> JoinRoom(long roomId, string? password = null)
+        protected override async Task<MultiplayerRoom> JoinRoom(long roomId, string? password = null)
         {
             if (!IsConnected.Value)
-                return Task.FromCanceled<MultiplayerRoom>(new CancellationToken(true));
+                throw new OperationCanceledException();
 
-            return connection.InvokeAsync<MultiplayerRoom>(nameof(IMultiplayerServer.JoinRoomWithPassword), roomId, password ?? string.Empty);
+            Debug.Assert(connection != null);
+
+            try
+            {
+                return await connection.InvokeAsync<MultiplayerRoom>(nameof(IMultiplayerServer.JoinRoomWithPassword), roomId, password ?? string.Empty).ConfigureAwait(false);
+            }
+            catch (HubException exception)
+            {
+                if (exception.GetHubExceptionMessage() == HubClientConnector.SERVER_SHUTDOWN_MESSAGE)
+                {
+                    Debug.Assert(connector != null);
+
+                    await connector.Reconnect().ConfigureAwait(false);
+                    return await JoinRoom(roomId, password).ConfigureAwait(false);
+                }
+
+                throw;
+            }
         }
 
         protected override Task LeaveRoomInternal()
@@ -81,13 +106,43 @@ namespace osu.Game.Online.Multiplayer
             if (!IsConnected.Value)
                 return Task.FromCanceled(new CancellationToken(true));
 
+            Debug.Assert(connection != null);
+
             return connection.InvokeAsync(nameof(IMultiplayerServer.LeaveRoom));
+        }
+
+        public override async Task InvitePlayer(int userId)
+        {
+            if (!IsConnected.Value)
+                return;
+
+            Debug.Assert(connection != null);
+
+            try
+            {
+                await connection.InvokeAsync(nameof(IMultiplayerServer.InvitePlayer), userId).ConfigureAwait(false);
+            }
+            catch (HubException exception)
+            {
+                switch (exception.GetHubExceptionMessage())
+                {
+                    case UserBlockedException.MESSAGE:
+                        PostNotification?.Invoke(new SimpleErrorNotification { Text = OnlinePlayStrings.InviteFailedUserBlocked });
+                        break;
+
+                    case UserBlocksPMsException.MESSAGE:
+                        PostNotification?.Invoke(new SimpleErrorNotification { Text = OnlinePlayStrings.InviteFailedUserOptOut });
+                        break;
+                }
+            }
         }
 
         public override Task TransferHost(int userId)
         {
             if (!IsConnected.Value)
                 return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
 
             return connection.InvokeAsync(nameof(IMultiplayerServer.TransferHost), userId);
         }
@@ -97,6 +152,8 @@ namespace osu.Game.Online.Multiplayer
             if (!IsConnected.Value)
                 return Task.CompletedTask;
 
+            Debug.Assert(connection != null);
+
             return connection.InvokeAsync(nameof(IMultiplayerServer.KickUser), userId);
         }
 
@@ -104,6 +161,8 @@ namespace osu.Game.Online.Multiplayer
         {
             if (!IsConnected.Value)
                 return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
 
             return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeSettings), settings);
         }
@@ -113,6 +172,8 @@ namespace osu.Game.Online.Multiplayer
             if (!IsConnected.Value)
                 return Task.CompletedTask;
 
+            Debug.Assert(connection != null);
+
             return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeState), newState);
         }
 
@@ -121,13 +182,27 @@ namespace osu.Game.Online.Multiplayer
             if (!IsConnected.Value)
                 return Task.CompletedTask;
 
+            Debug.Assert(connection != null);
+
             return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeBeatmapAvailability), newBeatmapAvailability);
+        }
+
+        public override Task ChangeUserStyle(int? beatmapId, int? rulesetId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeUserStyle), beatmapId, rulesetId);
         }
 
         public override Task ChangeUserMods(IEnumerable<APIMod> newMods)
         {
             if (!IsConnected.Value)
                 return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
 
             return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeUserMods), newMods);
         }
@@ -137,6 +212,8 @@ namespace osu.Game.Online.Multiplayer
             if (!IsConnected.Value)
                 return Task.CompletedTask;
 
+            Debug.Assert(connection != null);
+
             return connection.InvokeAsync(nameof(IMultiplayerServer.SendMatchRequest), request);
         }
 
@@ -145,30 +222,67 @@ namespace osu.Game.Online.Multiplayer
             if (!IsConnected.Value)
                 return Task.CompletedTask;
 
+            Debug.Assert(connection != null);
+
             return connection.InvokeAsync(nameof(IMultiplayerServer.StartMatch));
         }
 
-        protected override Task<BeatmapSetInfo> GetOnlineBeatmapSet(int beatmapId, CancellationToken cancellationToken = default)
+        public override Task AbortGameplay()
         {
-            var tcs = new TaskCompletionSource<BeatmapSetInfo>();
-            var req = new GetBeatmapSetRequest(beatmapId, BeatmapSetLookupType.BeatmapId);
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
 
-            req.Success += res =>
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    tcs.SetCanceled();
-                    return;
-                }
+            Debug.Assert(connection != null);
 
-                tcs.SetResult(res.ToBeatmapSet(Rulesets));
-            };
+            return connection.InvokeAsync(nameof(IMultiplayerServer.AbortGameplay));
+        }
 
-            req.Failure += e => tcs.SetException(e);
+        public override Task AbortMatch()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
 
-            API.Queue(req);
+            Debug.Assert(connection != null);
 
-            return tcs.Task;
+            return connection.InvokeAsync(nameof(IMultiplayerServer.AbortMatch));
+        }
+
+        public override Task AddPlaylistItem(MultiplayerPlaylistItem item)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.AddPlaylistItem), item);
+        }
+
+        public override Task EditPlaylistItem(MultiplayerPlaylistItem item)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.EditPlaylistItem), item);
+        }
+
+        public override Task RemovePlaylistItem(long playlistItemId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.RemovePlaylistItem), playlistItemId);
+        }
+
+        public override Task DisconnectInternal()
+        {
+            if (connector == null)
+                return Task.CompletedTask;
+
+            return connector.Disconnect();
         }
 
         protected override void Dispose(bool isDisposing)

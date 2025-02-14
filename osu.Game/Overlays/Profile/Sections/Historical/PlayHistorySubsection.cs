@@ -3,21 +3,20 @@
 
 using osu.Framework.Bindables;
 using osu.Framework.Localisation;
+using osu.Game.Online.API.Requests.Responses;
 using osu.Game.Resources.Localisation.Web;
-using osu.Game.Users;
-using static osu.Game.Users.User;
 
 namespace osu.Game.Overlays.Profile.Sections.Historical
 {
-    public class PlayHistorySubsection : ChartProfileSubsection
+    public partial class PlayHistorySubsection : ChartProfileSubsection
     {
         protected override LocalisableString GraphCounterName => UsersStrings.ShowExtraHistoricalMonthlyPlaycountsCountLabel;
 
-        public PlayHistorySubsection(Bindable<User> user)
+        public PlayHistorySubsection(Bindable<UserProfileData?> user)
             : base(user, UsersStrings.ShowExtraHistoricalMonthlyPlaycountsTitle)
         {
         }
 
-        protected override UserHistoryCount[] GetValues(User user) => user?.MonthlyPlaycounts;
+        protected override APIUserHistoryCount[]? GetValues(APIUser? user) => user?.MonthlyPlayCounts;
     }
 }

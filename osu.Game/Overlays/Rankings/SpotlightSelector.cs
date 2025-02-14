@@ -1,6 +1,8 @@
 ﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics;
@@ -22,7 +24,7 @@ using osu.Game.Resources.Localisation.Web;
 
 namespace osu.Game.Overlays.Rankings
 {
-    public class SpotlightSelector : CompositeDrawable, IHasCurrentValue<APISpotlight>
+    public partial class SpotlightSelector : CompositeDrawable, IHasCurrentValue<APISpotlight>
     {
         private readonly BindableWithCurrent<APISpotlight> current = new BindableWithCurrent<APISpotlight>();
         public readonly Bindable<RankingsSortCriteria> Sort = new Bindable<RankingsSortCriteria>();
@@ -61,7 +63,7 @@ namespace osu.Game.Overlays.Rankings
                 {
                     RelativeSizeAxes = Axes.X,
                     AutoSizeAxes = Axes.Y,
-                    Padding = new MarginPadding { Horizontal = UserProfileOverlay.CONTENT_X_MARGIN },
+                    Padding = new MarginPadding { Horizontal = WaveOverlayContainer.HORIZONTAL_PADDING },
                     Child = new FillFlowContainer
                     {
                         RelativeSizeAxes = Axes.X,
@@ -126,12 +128,12 @@ namespace osu.Game.Overlays.Rankings
             startDateColumn.Value = dateToString(response.Spotlight.StartDate);
             endDateColumn.Value = dateToString(response.Spotlight.EndDate);
             mapCountColumn.Value = response.BeatmapSets.Count.ToLocalisableString(@"N0");
-            participantsColumn.Value = response.Spotlight.Participants?.ToLocalisableString(@"N0");
+            participantsColumn.Value = response.Spotlight.Participants?.ToLocalisableString(@"N0") ?? default;
         }
 
         private LocalisableString dateToString(DateTimeOffset date) => date.ToLocalisableString(@"yyyy-MM-dd");
 
-        private class InfoColumn : FillFlowContainer
+        private partial class InfoColumn : FillFlowContainer
         {
             public LocalisableString Value
             {
@@ -173,24 +175,24 @@ namespace osu.Game.Overlays.Rankings
             }
         }
 
-        private class SpotlightsDropdown : OsuDropdown<APISpotlight>
+        private partial class SpotlightsDropdown : OsuDropdown<APISpotlight>
         {
-            private DropdownMenu menu;
+            private OsuDropdownMenu menu;
 
-            protected override DropdownMenu CreateMenu() => menu = base.CreateMenu().With(m => m.MaxHeight = 400);
+            protected override DropdownMenu CreateMenu() => menu = (OsuDropdownMenu)base.CreateMenu().With(m => m.MaxHeight = 400);
 
             protected override DropdownHeader CreateHeader() => new SpotlightsDropdownHeader();
 
             [BackgroundDependencyLoader]
             private void load(OverlayColourProvider colourProvider)
             {
-                // osu-web adds a 0.6 opacity container on top of the 0.5 base one when hovering, 0.8 on a single container here matches the resulting colour
-                AccentColour = colourProvider.Background6.Opacity(0.8f);
                 menu.BackgroundColour = colourProvider.Background5;
+                menu.HoverColour = colourProvider.Background4;
+                menu.SelectionColour = colourProvider.Background3;
                 Padding = new MarginPadding { Vertical = 20 };
             }
 
-            private class SpotlightsDropdownHeader : OsuDropdownHeader
+            private partial class SpotlightsDropdownHeader : OsuDropdownHeader
             {
                 public SpotlightsDropdownHeader()
                 {
@@ -198,14 +200,15 @@ namespace osu.Game.Overlays.Rankings
                     Text.Font = OsuFont.GetFont(size: 15);
                     Text.Padding = new MarginPadding { Vertical = 1.5f }; // osu-web line-height difference compensation
                     Foreground.Padding = new MarginPadding { Horizontal = 10, Vertical = 15 };
-                    Margin = Icon.Margin = new MarginPadding(0);
+                    Margin = Chevron.Margin = new MarginPadding(0);
                 }
 
                 [BackgroundDependencyLoader]
                 private void load(OverlayColourProvider colourProvider)
                 {
                     BackgroundColour = colourProvider.Background6.Opacity(0.5f);
-                    BackgroundColourHover = colourProvider.Background5;
+                    // osu-web adds a 0.6 opacity container on top of the 0.5 base one when hovering, 0.8 on a single container here matches the resulting colour
+                    BackgroundColourHover = colourProvider.Background6.Opacity(0.8f);
                 }
             }
         }

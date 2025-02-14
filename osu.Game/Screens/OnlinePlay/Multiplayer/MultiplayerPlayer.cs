@@ -7,9 +7,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
-using osu.Framework.Graphics;
-using osu.Framework.Graphics.Containers;
+using osu.Framework.Extensions.ObjectExtensions;
 using osu.Framework.Logging;
+using osu.Framework.Screens;
 using osu.Game.Graphics.UserInterface;
 using osu.Game.Online.Multiplayer;
 using osu.Game.Online.Rooms;
@@ -18,32 +18,25 @@ using osu.Game.Screens.Play;
 using osu.Game.Screens.Play.HUD;
 using osu.Game.Screens.Ranking;
 using osu.Game.Users;
-using osuTK;
 
 namespace osu.Game.Screens.OnlinePlay.Multiplayer
 {
-    public class MultiplayerPlayer : RoomSubmittingPlayer
+    public partial class MultiplayerPlayer : RoomSubmittingPlayer
     {
         protected override bool PauseOnFocusLost => false;
-
-        // Disallow fails in multiplayer for now.
-        protected override bool CheckModsAllowFailure() => false;
 
         protected override UserActivity InitialActivity => new UserActivity.InMultiplayerGame(Beatmap.Value.BeatmapInfo, Ruleset.Value);
 
         [Resolved]
-        private MultiplayerClient client { get; set; }
+        private MultiplayerClient client { get; set; } = null!;
 
-        private IBindable<bool> isConnected;
+        private IBindable<bool> isConnected = null!;
 
         private readonly TaskCompletionSource<bool> resultsReady = new TaskCompletionSource<bool>();
-
-        private MultiplayerGameplayLeaderboard leaderboard;
-
         private readonly MultiplayerRoomUser[] users;
 
-        private LoadingLayer loadingDisplay;
-        private FillFlowContainer leaderboardFlow;
+        private LoadingLayer loadingDisplay = null!;
+        private MultiplayerGameplayLeaderboard multiplayerLeaderboard = null!;
 
         /// <summary>
         /// Construct a multiplayer player.
@@ -56,7 +49,10 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer
             {
                 AllowPause = false,
                 AllowRestart = false,
-                AllowSkipping = false,
+                AllowFailAnimation = false,
+                AllowSkipping = room.AutoSkip,
+                AutomaticallySkipIntro = room.AutoSkip,
+                AlwaysShowLeaderboard = true,
             })
         {
             this.users = users;
@@ -68,40 +64,33 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer
             if (!LoadedBeatmapSuccessfully)
                 return;
 
-            HUDOverlay.Add(leaderboardFlow = new FillFlowContainer
-            {
-                AutoSizeAxes = Axes.Both,
-                Direction = FillDirection.Vertical,
-                Spacing = new Vector2(5)
-            });
-
-            // todo: this should be implemented via a custom HUD implementation, and correctly masked to the main content area.
-            LoadComponentAsync(leaderboard = new MultiplayerGameplayLeaderboard(ScoreProcessor, users), l =>
-            {
-                if (!LoadedBeatmapSuccessfully)
-                    return;
-
-                ((IBindable<bool>)leaderboard.Expanded).BindTo(HUDOverlay.ShowHud);
-
-                leaderboardFlow.Insert(0, l);
-
-                if (leaderboard.TeamScores.Count >= 2)
-                {
-                    LoadComponentAsync(new GameplayMatchScoreDisplay
-                    {
-                        Team1Score = { BindTarget = leaderboard.TeamScores.First().Value },
-                        Team2Score = { BindTarget = leaderboard.TeamScores.Last().Value },
-                        Expanded = { BindTarget = HUDOverlay.ShowHud },
-                    }, scoreDisplay => leaderboardFlow.Insert(1, scoreDisplay));
-                }
-            });
+            ScoreProcessor.ApplyNewJudgementsWhenFailed = true;
 
             LoadComponentAsync(new GameplayChatDisplay(Room)
             {
-                Expanded = { BindTarget = HUDOverlay.ShowHud },
-            }, chat => leaderboardFlow.Insert(2, chat));
+                Expanded = { BindTarget = LeaderboardExpandedState },
+            }, chat => HUDOverlay.LeaderboardFlow.Insert(2, chat));
 
             HUDOverlay.Add(loadingDisplay = new LoadingLayer(true) { Depth = float.MaxValue });
+        }
+
+        protected override GameplayLeaderboard CreateGameplayLeaderboard() => multiplayerLeaderboard = new MultiplayerGameplayLeaderboard(users);
+
+        protected override void AddLeaderboardToHUD(GameplayLeaderboard leaderboard)
+        {
+            Debug.Assert(leaderboard == multiplayerLeaderboard);
+
+            HUDOverlay.LeaderboardFlow.Insert(0, leaderboard);
+
+            if (multiplayerLeaderboard.TeamScores.Count >= 2)
+            {
+                LoadComponentAsync(new GameplayMatchScoreDisplay
+                {
+                    Team1Score = { BindTarget = multiplayerLeaderboard.TeamScores.First().Value },
+                    Team2Score = { BindTarget = multiplayerLeaderboard.TeamScores.Last().Value },
+                    Expanded = { BindTarget = HUDOverlay.ShowHud },
+                }, scoreDisplay => HUDOverlay.LeaderboardFlow.Insert(1, scoreDisplay));
+            }
         }
 
         protected override void LoadAsyncComplete()
@@ -114,10 +103,10 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer
             if (!ValidForResume)
                 return; // token retrieval may have failed.
 
-            client.MatchStarted += onMatchStarted;
+            client.GameplayStarted += onGameplayStarted;
             client.ResultsReady += onResultsReady;
 
-            ScoreProcessor.HasCompleted.BindValueChanged(completed =>
+            ScoreProcessor.HasCompleted.BindValueChanged(_ =>
             {
                 // wait for server to tell us that results are ready (see SubmitScore implementation)
                 loadingDisplay.Show();
@@ -132,50 +121,64 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer
                     failAndBail();
                 }
             }), true);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
 
             Debug.Assert(client.Room != null);
         }
 
         protected override void StartGameplay()
         {
-            // block base call, but let the server know we are ready to start.
-            loadingDisplay.Show();
+            // We can enter this screen one of two ways:
+            // 1. Via the automatic natural progression of PlayerLoader into Player.
+            //    We'll arrive here in a Loaded state, and we need to let the server know that we're ready to start.
+            // 2. Via the server forcefully starting gameplay because players have been hanging out in PlayerLoader for too long.
+            //    We'll arrive here in a Playing state, and we should neither show the loading spinner nor tell the server that we're ready to start (gameplay has already started).
+            //
+            // The base call is blocked here because in both cases gameplay is started only when the server says so via onGameplayStarted().
 
-            client.ChangeState(MultiplayerUserState.Loaded).ContinueWith(task => failAndBail(task.Exception?.Message ?? "Server error"), TaskContinuationOptions.NotOnRanToCompletion);
+            if (client.LocalUser?.State == MultiplayerUserState.Loaded)
+            {
+                loadingDisplay.Show();
+                client.ChangeState(MultiplayerUserState.ReadyForGameplay);
+            }
+
+            // This will pause the clock, pending the gameplay started callback from the server.
+            GameplayClockContainer.Reset();
         }
 
-        private void failAndBail(string message = null)
+        private void failAndBail(string? message = null)
         {
             if (!string.IsNullOrEmpty(message))
                 Logger.Log(message, LoggingTarget.Runtime, LogLevel.Important);
 
-            Schedule(() => PerformExit(false));
+            Schedule(() => PerformExit());
         }
 
-        protected override void Update()
+        private void onGameplayStarted() => Scheduler.Add(() =>
         {
-            base.Update();
-
-            if (!LoadedBeatmapSuccessfully)
+            if (!this.IsCurrentScreen())
                 return;
 
-            adjustLeaderboardPosition();
-        }
-
-        private void adjustLeaderboardPosition()
-        {
-            const float padding = 44; // enough margin to avoid the hit error display.
-
-            leaderboardFlow.Position = new Vector2(padding, padding + HUDOverlay.TopScoringElementsHeight);
-        }
-
-        private void onMatchStarted() => Scheduler.Add(() =>
-        {
             loadingDisplay.Hide();
             base.StartGameplay();
         });
 
-        private void onResultsReady() => resultsReady.SetResult(true);
+        private void onResultsReady()
+        {
+            // Schedule is required to ensure that `TaskCompletionSource.SetResult` is not called more than once.
+            // A scenario where this can occur is if this instance is not immediately disposed (ie. async disposal queue).
+            Schedule(() =>
+            {
+                if (!this.IsCurrentScreen())
+                    return;
+
+                resultsReady.SetResult(true);
+            });
+        }
 
         protected override async Task PrepareScoreForResultsAsync(Score score)
         {
@@ -190,20 +193,26 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer
 
         protected override ResultsScreen CreateResults(ScoreInfo score)
         {
-            Debug.Assert(Room.RoomID.Value != null);
+            Debug.Assert(Room.RoomID != null);
 
-            return leaderboard.TeamScores.Count == 2
-                ? new MultiplayerTeamResultsScreen(score, Room.RoomID.Value.Value, PlaylistItem, leaderboard.TeamScores)
-                : new MultiplayerResultsScreen(score, Room.RoomID.Value.Value, PlaylistItem);
+            return multiplayerLeaderboard.TeamScores.Count == 2
+                ? new MultiplayerTeamResultsScreen(score, Room.RoomID.Value, PlaylistItem, multiplayerLeaderboard.TeamScores)
+                {
+                    ShowUserStatistics = true,
+                }
+                : new MultiplayerResultsScreen(score, Room.RoomID.Value, PlaylistItem)
+                {
+                    ShowUserStatistics = true
+                };
         }
 
         protected override void Dispose(bool isDisposing)
         {
             base.Dispose(isDisposing);
 
-            if (client != null)
+            if (client.IsNotNull())
             {
-                client.MatchStarted -= onMatchStarted;
+                client.GameplayStarted -= onGameplayStarted;
                 client.ResultsReady -= onResultsReady;
             }
         }

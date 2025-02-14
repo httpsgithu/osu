@@ -1,17 +1,17 @@
-// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
 using System.Linq;
-using osu.Framework.Extensions.IEnumerableExtensions;
 using osu.Game.Rulesets.Osu.UI;
 using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Osu.Beatmaps;
 using osu.Game.Rulesets.Osu.Objects;
 using osuTK;
 
 namespace osu.Game.Rulesets.Osu.Utils
 {
-    public static class OsuHitObjectGenerationUtils
+    public static partial class OsuHitObjectGenerationUtils
     {
         // The relative distance to the edge of the playfield before objects' positions should start to "turn around" and curve towards the middle.
         // The closer the hit objects draw to the border, the sharper the turn
@@ -40,7 +40,7 @@ namespace osu.Game.Rulesets.Osu.Utils
         /// <returns>The new position of the hit object, relative to the previous one.</returns>
         public static Vector2 RotateAwayFromEdge(Vector2 prevObjectPos, Vector2 posRelativeToPrev, float rotationRatio = 0.5f)
         {
-            var relativeRotationDistance = 0f;
+            float relativeRotationDistance = 0f;
 
             if (prevObjectPos.X < playfield_middle.X)
             {
@@ -88,16 +88,16 @@ namespace osu.Game.Rulesets.Osu.Utils
         /// <returns>The rotated vector.</returns>
         public static Vector2 RotateVectorTowardsVector(Vector2 initial, Vector2 destination, float rotationRatio)
         {
-            var initialAngleRad = MathF.Atan2(initial.Y, initial.X);
-            var destAngleRad = MathF.Atan2(destination.Y, destination.X);
+            float initialAngleRad = MathF.Atan2(initial.Y, initial.X);
+            float destAngleRad = MathF.Atan2(destination.Y, destination.X);
 
-            var diff = destAngleRad - initialAngleRad;
+            float diff = destAngleRad - initialAngleRad;
 
             while (diff < -MathF.PI) diff += 2 * MathF.PI;
 
             while (diff > MathF.PI) diff -= 2 * MathF.PI;
 
-            var finalAngleRad = initialAngleRad + rotationRatio * diff;
+            float finalAngleRad = initialAngleRad + rotationRatio * diff;
 
             return new Vector2(
                 initial.Length * MathF.Cos(finalAngleRad),
@@ -109,42 +109,114 @@ namespace osu.Game.Rulesets.Osu.Utils
         /// Reflects the position of the <see cref="OsuHitObject"/> in the playfield horizontally.
         /// </summary>
         /// <param name="osuObject">The object to reflect.</param>
-        public static void ReflectHorizontally(OsuHitObject osuObject)
+        public static void ReflectHorizontallyAlongPlayfield(OsuHitObject osuObject)
         {
             osuObject.Position = new Vector2(OsuPlayfield.BASE_SIZE.X - osuObject.X, osuObject.Position.Y);
 
-            if (!(osuObject is Slider slider))
+            if (osuObject is not Slider slider)
                 return;
 
-            slider.NestedHitObjects.OfType<SliderTick>().ForEach(h => h.Position = new Vector2(OsuPlayfield.BASE_SIZE.X - h.Position.X, h.Position.Y));
-            slider.NestedHitObjects.OfType<SliderRepeat>().ForEach(h => h.Position = new Vector2(OsuPlayfield.BASE_SIZE.X - h.Position.X, h.Position.Y));
+            static void reflectControlPoint(PathControlPoint point) => point.Position = new Vector2(-point.Position.X, point.Position.Y);
 
-            var controlPoints = slider.Path.ControlPoints.Select(p => new PathControlPoint(p.Position, p.Type)).ToArray();
-            foreach (var point in controlPoints)
-                point.Position = new Vector2(-point.Position.X, point.Position.Y);
-
-            slider.Path = new SliderPath(controlPoints, slider.Path.ExpectedDistance.Value);
+            modifySlider(slider, reflectControlPoint);
         }
 
         /// <summary>
         /// Reflects the position of the <see cref="OsuHitObject"/> in the playfield vertically.
         /// </summary>
         /// <param name="osuObject">The object to reflect.</param>
-        public static void ReflectVertically(OsuHitObject osuObject)
+        public static void ReflectVerticallyAlongPlayfield(OsuHitObject osuObject)
         {
             osuObject.Position = new Vector2(osuObject.Position.X, OsuPlayfield.BASE_SIZE.Y - osuObject.Y);
 
-            if (!(osuObject is Slider slider))
+            if (osuObject is not Slider slider)
                 return;
 
-            slider.NestedHitObjects.OfType<SliderTick>().ForEach(h => h.Position = new Vector2(h.Position.X, OsuPlayfield.BASE_SIZE.Y - h.Position.Y));
-            slider.NestedHitObjects.OfType<SliderRepeat>().ForEach(h => h.Position = new Vector2(h.Position.X, OsuPlayfield.BASE_SIZE.Y - h.Position.Y));
+            static void reflectControlPoint(PathControlPoint point) => point.Position = new Vector2(point.Position.X, -point.Position.Y);
 
+            modifySlider(slider, reflectControlPoint);
+        }
+
+        /// <summary>
+        /// Flips the position of the <see cref="Slider"/> around its start position horizontally.
+        /// </summary>
+        /// <param name="slider">The slider to be flipped.</param>
+        public static void FlipSliderInPlaceHorizontally(Slider slider)
+        {
+            static void flipControlPoint(PathControlPoint point) => point.Position = new Vector2(-point.Position.X, point.Position.Y);
+
+            modifySlider(slider, flipControlPoint);
+        }
+
+        /// <summary>
+        /// Rotate a slider about its start position by the specified angle.
+        /// </summary>
+        /// <param name="slider">The slider to be rotated.</param>
+        /// <param name="rotation">The angle, measured in radians, to rotate the slider by.</param>
+        public static void RotateSlider(Slider slider, float rotation)
+        {
+            void rotateControlPoint(PathControlPoint point) => point.Position = rotateVector(point.Position, rotation);
+
+            modifySlider(slider, rotateControlPoint);
+        }
+
+        private static void modifySlider(Slider slider, Action<PathControlPoint> modifyControlPoint)
+        {
             var controlPoints = slider.Path.ControlPoints.Select(p => new PathControlPoint(p.Position, p.Type)).ToArray();
             foreach (var point in controlPoints)
-                point.Position = new Vector2(point.Position.X, -point.Position.Y);
+                modifyControlPoint(point);
 
             slider.Path = new SliderPath(controlPoints, slider.Path.ExpectedDistance.Value);
+        }
+
+        /// <summary>
+        /// Rotate a vector by the specified angle.
+        /// </summary>
+        /// <param name="vector">The vector to be rotated.</param>
+        /// <param name="rotation">The angle, measured in radians, to rotate the vector by.</param>
+        /// <returns>The rotated vector.</returns>
+        private static Vector2 rotateVector(Vector2 vector, float rotation)
+        {
+            float angle = MathF.Atan2(vector.Y, vector.X) + rotation;
+            float length = vector.Length;
+            return new Vector2(
+                length * MathF.Cos(angle),
+                length * MathF.Sin(angle)
+            );
+        }
+
+        /// <param name="beatmap">The beatmap hitObject is a part of.</param>
+        /// <param name="hitObject">The <see cref="OsuHitObject"/> that should be checked.</param>
+        /// <param name="downbeatsOnly">If true, this method only returns true if hitObject is on a downbeat.
+        /// If false, it returns true if hitObject is on any beat.</param>
+        /// <returns>true if hitObject is on a (down-)beat, false otherwise.</returns>
+        public static bool IsHitObjectOnBeat(OsuBeatmap beatmap, OsuHitObject hitObject, bool downbeatsOnly = false)
+        {
+            var timingPoint = beatmap.ControlPointInfo.TimingPointAt(hitObject.StartTime);
+
+            double timeSinceTimingPoint = hitObject.StartTime - timingPoint.Time;
+
+            double beatLength = timingPoint.BeatLength;
+
+            if (downbeatsOnly)
+                beatLength *= timingPoint.TimeSignature.Numerator;
+
+            // Ensure within 1ms of expected location.
+            return Math.Abs(timeSinceTimingPoint + 1) % beatLength < 2;
+        }
+
+        /// <summary>
+        /// Generates a random number from a normal distribution using the Box-Muller transform.
+        /// </summary>
+        public static float RandomGaussian(Random rng, float mean = 0, float stdDev = 1)
+        {
+            // Generate 2 random numbers in the interval (0,1].
+            // x1 must not be 0 since log(0) = undefined.
+            double x1 = 1 - rng.NextDouble();
+            double x2 = 1 - rng.NextDouble();
+
+            double stdNormal = Math.Sqrt(-2 * Math.Log(x1)) * Math.Sin(2 * Math.PI * x2);
+            return mean + stdDev * (float)stdNormal;
         }
     }
 }

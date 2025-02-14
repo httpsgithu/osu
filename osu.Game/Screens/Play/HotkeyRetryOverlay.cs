@@ -8,10 +8,13 @@ using osu.Game.Overlays;
 
 namespace osu.Game.Screens.Play
 {
-    public class HotkeyRetryOverlay : HoldToConfirmOverlay, IKeyBindingHandler<GlobalAction>
+    public partial class HotkeyRetryOverlay : HoldToConfirmOverlay, IKeyBindingHandler<GlobalAction>
     {
         public bool OnPressed(KeyBindingPressEvent<GlobalAction> e)
         {
+            if (e.Repeat)
+                return false;
+
             if (e.Action != GlobalAction.QuickRetry) return false;
 
             BeginConfirm();

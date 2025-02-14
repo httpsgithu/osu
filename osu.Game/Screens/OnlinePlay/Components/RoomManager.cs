@@ -7,34 +7,27 @@ using System.Diagnostics;
 using System.Linq;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
+using osu.Framework.Development;
 using osu.Framework.Graphics;
 using osu.Framework.Logging;
-using osu.Game.Beatmaps;
 using osu.Game.Online.API;
 using osu.Game.Online.Rooms;
-using osu.Game.Rulesets;
 
 namespace osu.Game.Screens.OnlinePlay.Components
 {
-    public class RoomManager : Component, IRoomManager
+    public partial class RoomManager : Component, IRoomManager
     {
-        public event Action RoomsUpdated;
+        public event Action? RoomsUpdated;
 
         private readonly BindableList<Room> rooms = new BindableList<Room>();
 
         public IBindableList<Room> Rooms => rooms;
 
-        protected IBindable<Room> JoinedRoom => joinedRoom;
-        private readonly Bindable<Room> joinedRoom = new Bindable<Room>();
+        protected IBindable<Room?> JoinedRoom => joinedRoom;
+        private readonly Bindable<Room?> joinedRoom = new Bindable<Room?>();
 
         [Resolved]
-        private RulesetStore rulesets { get; set; }
-
-        [Resolved]
-        private BeatmapManager beatmaps { get; set; }
-
-        [Resolved]
-        private IAPIProvider api { get; set; }
+        private IAPIProvider api { get; set; } = null!;
 
         public RoomManager()
         {
@@ -47,9 +40,9 @@ namespace osu.Game.Screens.OnlinePlay.Components
             PartRoom();
         }
 
-        public virtual void CreateRoom(Room room, Action<Room> onSuccess = null, Action<string> onError = null)
+        public virtual void CreateRoom(Room room, Action<Room>? onSuccess = null, Action<string>? onError = null)
         {
-            room.Host.Value = api.LocalUser.Value;
+            room.Host = api.LocalUser.Value;
 
             var req = new CreateRoomRequest(room);
 
@@ -66,22 +59,26 @@ namespace osu.Game.Screens.OnlinePlay.Components
 
             req.Failure += exception =>
             {
-                onError?.Invoke(req.Result?.Error ?? exception.Message);
+                onError?.Invoke(req.Response?.Error ?? exception.Message);
             };
 
             api.Queue(req);
         }
 
-        private JoinRoomRequest currentJoinRoomRequest;
+        private JoinRoomRequest? currentJoinRoomRequest;
 
-        public virtual void JoinRoom(Room room, string password = null, Action<Room> onSuccess = null, Action<string> onError = null)
+        public virtual void JoinRoom(Room room, string? password = null, Action<Room>? onSuccess = null, Action<string>? onError = null)
         {
             currentJoinRoomRequest?.Cancel();
             currentJoinRoomRequest = new JoinRoomRequest(room, password);
 
-            currentJoinRoomRequest.Success += () =>
+            currentJoinRoomRequest.Success += result =>
             {
                 joinedRoom.Value = room;
+
+                AddOrUpdateRoom(result);
+                room.CopyFrom(result); // Also copy back to the source model, since this is likely to have been stored elsewhere.
+
                 onSuccess?.Invoke(room);
             };
 
@@ -100,10 +97,12 @@ namespace osu.Game.Screens.OnlinePlay.Components
         {
             currentJoinRoomRequest?.Cancel();
 
-            if (JoinedRoom.Value == null)
+            if (joinedRoom.Value == null)
                 return;
 
-            api.Queue(new PartRoomRequest(joinedRoom.Value));
+            if (api.State.Value == APIState.Online)
+                api.Queue(new PartRoomRequest(joinedRoom.Value));
+
             joinedRoom.Value = null;
         }
 
@@ -111,19 +110,15 @@ namespace osu.Game.Screens.OnlinePlay.Components
 
         public void AddOrUpdateRoom(Room room)
         {
-            Debug.Assert(room.RoomID.Value != null);
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+            Debug.Assert(room.RoomID != null);
 
-            if (ignoredRooms.Contains(room.RoomID.Value.Value))
+            if (ignoredRooms.Contains(room.RoomID.Value))
                 return;
-
-            room.Position.Value = -room.RoomID.Value.Value;
 
             try
             {
-                foreach (var pi in room.Playlist)
-                    pi.MapObjects(beatmaps, rulesets);
-
-                var existing = rooms.FirstOrDefault(e => e.RoomID.Value == room.RoomID.Value);
+                var existing = rooms.FirstOrDefault(e => e.RoomID == room.RoomID);
                 if (existing == null)
                     rooms.Add(room);
                 else
@@ -131,9 +126,9 @@ namespace osu.Game.Screens.OnlinePlay.Components
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, $"Failed to update room: {room.Name.Value}.");
+                Logger.Error(ex, $"Failed to update room: {room.Name}.");
 
-                ignoredRooms.Add(room.RoomID.Value.Value);
+                ignoredRooms.Add(room.RoomID.Value);
                 rooms.Remove(room);
             }
 
@@ -142,16 +137,25 @@ namespace osu.Game.Screens.OnlinePlay.Components
 
         public void RemoveRoom(Room room)
         {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
             rooms.Remove(room);
             notifyRoomsUpdated();
         }
 
         public void ClearRooms()
         {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
             rooms.Clear();
             notifyRoomsUpdated();
         }
 
-        private void notifyRoomsUpdated() => Scheduler.AddOnce(() => RoomsUpdated?.Invoke());
+        private void notifyRoomsUpdated()
+        {
+            Scheduler.AddOnce(invokeRoomsUpdated);
+
+            void invokeRoomsUpdated() => RoomsUpdated?.Invoke();
+        }
     }
 }

@@ -1,29 +1,25 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using System;
+using osu.Framework.Bindables;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
+using osu.Game.Online.Rooms;
 
 namespace osu.Game.Screens.OnlinePlay.Multiplayer.Match
 {
-    public class MultiplayerMatchFooter : CompositeDrawable
+    public partial class MultiplayerMatchFooter : CompositeDrawable
     {
         private const float ready_button_width = 600;
         private const float spectate_button_width = 200;
 
-        public Action OnReadyClick
+        public required Bindable<PlaylistItem?> SelectedItem
         {
-            set => readyButton.OnReadyClick = value;
+            get => selectedItem;
+            set => selectedItem.Current = value;
         }
 
-        public Action OnSpectateClick
-        {
-            set => spectateButton.OnSpectateClick = value;
-        }
-
-        private readonly MultiplayerReadyButton readyButton;
-        private readonly MultiplayerSpectateButton spectateButton;
+        private readonly BindableWithCurrent<PlaylistItem?> selectedItem = new BindableWithCurrent<PlaylistItem?>();
 
         public MultiplayerMatchFooter()
         {
@@ -34,17 +30,19 @@ namespace osu.Game.Screens.OnlinePlay.Multiplayer.Match
                 RelativeSizeAxes = Axes.Both,
                 Content = new[]
                 {
-                    new Drawable[]
+                    new Drawable?[]
                     {
                         null,
-                        spectateButton = new MultiplayerSpectateButton
+                        new MultiplayerSpectateButton
                         {
                             RelativeSizeAxes = Axes.Both,
+                            SelectedItem = selectedItem
                         },
                         null,
-                        readyButton = new MultiplayerReadyButton
+                        new MatchStartControl
                         {
                             RelativeSizeAxes = Axes.Both,
+                            SelectedItem = selectedItem
                         },
                         null
                     }

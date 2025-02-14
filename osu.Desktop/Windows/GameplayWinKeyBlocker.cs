@@ -10,19 +10,23 @@ using osu.Game.Screens.Play;
 
 namespace osu.Desktop.Windows
 {
-    public class GameplayWinKeyBlocker : Component
+    public partial class GameplayWinKeyBlocker : Component
     {
-        private Bindable<bool> disableWinKey;
-        private IBindable<bool> localUserPlaying;
+        private Bindable<bool> disableWinKey = null!;
+        private IBindable<LocalUserPlayingState> localUserPlaying = null!;
+        private IBindable<bool> isActive = null!;
 
         [Resolved]
-        private GameHost host { get; set; }
+        private GameHost host { get; set; } = null!;
 
         [BackgroundDependencyLoader]
         private void load(ILocalUserPlayInfo localUserInfo, OsuConfigManager config)
         {
-            localUserPlaying = localUserInfo.IsPlaying.GetBoundCopy();
+            localUserPlaying = localUserInfo.PlayingState.GetBoundCopy();
             localUserPlaying.BindValueChanged(_ => updateBlocking());
+
+            isActive = host.IsActive.GetBoundCopy();
+            isActive.BindValueChanged(_ => updateBlocking());
 
             disableWinKey = config.GetBindable<bool>(OsuSetting.GameplayDisableWinKey);
             disableWinKey.BindValueChanged(_ => updateBlocking(), true);
@@ -30,7 +34,7 @@ namespace osu.Desktop.Windows
 
         private void updateBlocking()
         {
-            bool shouldDisable = disableWinKey.Value && localUserPlaying.Value;
+            bool shouldDisable = isActive.Value && disableWinKey.Value && localUserPlaying.Value == LocalUserPlayingState.Playing;
 
             if (shouldDisable)
                 host.InputThread.Scheduler.Add(WindowsKey.Disable);

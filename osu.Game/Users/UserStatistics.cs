@@ -1,19 +1,26 @@
 ﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using System;
+using System.Collections.Generic;
+using System.Runtime.Serialization;
+using JetBrains.Annotations;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using osu.Framework.Localisation;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Resources.Localisation.Web;
 using osu.Game.Scoring;
 using osu.Game.Utils;
-using static osu.Game.Users.User;
 
 namespace osu.Game.Users
 {
     public class UserStatistics
     {
         [JsonProperty]
-        public User User;
+        public APIUser User;
 
         [JsonProperty(@"level")]
         public LevelInfo Level;
@@ -27,6 +34,9 @@ namespace osu.Game.Users
             public int Progress;
         }
 
+        [JsonProperty(@"is_ranked")]
+        public bool IsRanked;
+
         [JsonProperty(@"global_rank")]
         public int? GlobalRank;
 
@@ -34,7 +44,7 @@ namespace osu.Game.Users
         public int? CountryRank;
 
         // populated via User model, as that's where the data currently lives.
-        public RankHistoryData RankHistory;
+        public APIRankHistory RankHistory;
 
         [JsonProperty(@"pp")]
         public decimal? PP;
@@ -68,6 +78,10 @@ namespace osu.Game.Users
 
         [JsonProperty(@"grade_counts")]
         public Grades GradesCount;
+
+        [JsonProperty(@"variants")]
+        [CanBeNull]
+        public List<Variant> Variants;
 
         public struct Grades
         {
@@ -112,6 +126,36 @@ namespace osu.Game.Users
                     }
                 }
             }
+        }
+
+        public enum RulesetVariant
+        {
+            [EnumMember(Value = "4k")]
+            [LocalisableDescription(typeof(BeatmapsStrings), nameof(BeatmapsStrings.VariantMania4k))]
+            FourKey,
+
+            [EnumMember(Value = "7k")]
+            [LocalisableDescription(typeof(BeatmapsStrings), nameof(BeatmapsStrings.VariantMania7k))]
+            SevenKey
+        }
+
+        public class Variant
+        {
+            [JsonProperty("country_rank")]
+            public int? CountryRank;
+
+            [JsonProperty("global_rank")]
+            public int? GlobalRank;
+
+            [JsonProperty("mode")]
+            public string Mode;
+
+            [JsonProperty("pp")]
+            public decimal PP;
+
+            [JsonProperty("variant")]
+            [JsonConverter(typeof(StringEnumConverter))]
+            public RulesetVariant VariantType;
         }
     }
 }

@@ -1,6 +1,8 @@
 ﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using System;
 using osu.Framework.Allocation;
 using osu.Framework.Extensions.Color4Extensions;
@@ -19,13 +21,13 @@ using osuTK;
 
 namespace osu.Game.Overlays.BeatmapSet
 {
-    public class BasicStats : Container
+    public partial class BasicStats : Container
     {
         private readonly Statistic length, bpm, circleCount, sliderCount;
 
-        private BeatmapSetInfo beatmapSet;
+        private IBeatmapSetInfo beatmapSet;
 
-        public BeatmapSetInfo BeatmapSet
+        public IBeatmapSetInfo BeatmapSet
         {
             get => beatmapSet;
             set
@@ -38,16 +40,16 @@ namespace osu.Game.Overlays.BeatmapSet
             }
         }
 
-        private BeatmapInfo beatmap;
+        private IBeatmapInfo beatmapInfo;
 
-        public BeatmapInfo Beatmap
+        public IBeatmapInfo BeatmapInfo
         {
-            get => beatmap;
+            get => beatmapInfo;
             set
             {
-                if (value == beatmap) return;
+                if (value == beatmapInfo) return;
 
-                beatmap = value;
+                beatmapInfo = value;
 
                 updateDisplay();
             }
@@ -55,21 +57,25 @@ namespace osu.Game.Overlays.BeatmapSet
 
         private void updateDisplay()
         {
-            bpm.Value = BeatmapSet?.OnlineInfo?.BPM.ToLocalisableString(@"0.##") ?? (LocalisableString)"-";
-
-            if (beatmap == null)
+            if (beatmapInfo == null)
             {
+                bpm.Value = "-";
+
                 length.Value = string.Empty;
                 circleCount.Value = string.Empty;
                 sliderCount.Value = string.Empty;
             }
             else
             {
-                length.TooltipText = BeatmapsetsStrings.ShowStatsTotalLength(TimeSpan.FromMilliseconds(beatmap.Length).ToFormattedDuration());
-                length.Value = TimeSpan.FromMilliseconds(beatmap.Length).ToFormattedDuration();
+                bpm.Value = beatmapInfo.BPM.ToLocalisableString(@"0.##");
 
-                circleCount.Value = beatmap.OnlineInfo.CircleCount.ToLocalisableString(@"N0");
-                sliderCount.Value = beatmap.OnlineInfo.SliderCount.ToLocalisableString(@"N0");
+                length.Value = TimeSpan.FromMilliseconds(beatmapInfo.Length).ToFormattedDuration();
+
+                if (beatmapInfo is not IBeatmapOnlineInfo onlineInfo) return;
+
+                circleCount.Value = onlineInfo.CircleCount.ToLocalisableString(@"N0");
+                sliderCount.Value = onlineInfo.SliderCount.ToLocalisableString(@"N0");
+                length.TooltipText = BeatmapsetsStrings.ShowStatsTotalLength(TimeSpan.FromMilliseconds(onlineInfo.HitLength).ToFormattedDuration());
             }
         }
 
@@ -112,7 +118,7 @@ namespace osu.Game.Overlays.BeatmapSet
             updateDisplay();
         }
 
-        private class Statistic : Container, IHasTooltip
+        private partial class Statistic : Container, IHasTooltip
         {
             private readonly OsuSpriteText value;
 

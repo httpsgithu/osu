@@ -1,6 +1,8 @@
 ﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using System;
 using osu.Framework.Screens;
 using osu.Framework.Graphics;
@@ -9,18 +11,18 @@ using osuTK;
 
 namespace osu.Game.Screens
 {
-    public abstract class BackgroundScreen : Screen, IEquatable<BackgroundScreen>
+    public abstract partial class BackgroundScreen : Screen, IEquatable<BackgroundScreen>
     {
-        protected const float TRANSITION_LENGTH = 500;
-        private const float x_movement_amount = 50;
+        public const float TRANSITION_LENGTH = 500;
 
-        private readonly bool animateOnEnter;
+        private const float x_movement_amount = 50;
 
         public override bool IsPresent => base.IsPresent || Scheduler.HasPendingTasks;
 
-        protected BackgroundScreen(bool animateOnEnter = true)
+        public bool AnimateEntry { get; set; } = true;
+
+        protected BackgroundScreen()
         {
-            this.animateOnEnter = animateOnEnter;
             Anchor = Anchor.Centre;
             Origin = Anchor.Centre;
         }
@@ -48,27 +50,26 @@ namespace osu.Game.Screens
             Scale = new Vector2(1 + x_movement_amount / DrawSize.X * 2);
         }
 
-        public override void OnEntering(IScreen last)
+        public override void OnEntering(ScreenTransitionEvent e)
         {
-            if (animateOnEnter)
+            if (AnimateEntry)
             {
                 this.FadeOut();
-                this.MoveToX(x_movement_amount);
-
                 this.FadeIn(TRANSITION_LENGTH, Easing.InOutQuart);
+                this.MoveToX(x_movement_amount);
                 this.MoveToX(0, TRANSITION_LENGTH, Easing.InOutQuart);
             }
 
-            base.OnEntering(last);
+            base.OnEntering(e);
         }
 
-        public override void OnSuspending(IScreen next)
+        public override void OnSuspending(ScreenTransitionEvent e)
         {
             this.MoveToX(-x_movement_amount, TRANSITION_LENGTH, Easing.InOutQuart);
-            base.OnSuspending(next);
+            base.OnSuspending(e);
         }
 
-        public override bool OnExiting(IScreen next)
+        public override bool OnExiting(ScreenExitEvent e)
         {
             if (IsLoaded)
             {
@@ -76,14 +77,14 @@ namespace osu.Game.Screens
                 this.MoveToX(x_movement_amount, TRANSITION_LENGTH, Easing.OutExpo);
             }
 
-            return base.OnExiting(next);
+            return base.OnExiting(e);
         }
 
-        public override void OnResuming(IScreen last)
+        public override void OnResuming(ScreenTransitionEvent e)
         {
             if (IsLoaded)
                 this.MoveToX(0, TRANSITION_LENGTH, Easing.OutExpo);
-            base.OnResuming(last);
+            base.OnResuming(e);
         }
     }
 }

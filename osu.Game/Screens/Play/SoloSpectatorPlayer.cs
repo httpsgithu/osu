@@ -2,18 +2,22 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using osu.Framework.Allocation;
+using osu.Framework.Extensions.ObjectExtensions;
 using osu.Framework.Screens;
 using osu.Game.Online.Spectator;
 using osu.Game.Scoring;
+using osu.Game.Users;
 
 namespace osu.Game.Screens.Play
 {
-    public class SoloSpectatorPlayer : SpectatorPlayer
+    public partial class SoloSpectatorPlayer : SpectatorPlayer
     {
         private readonly Score score;
 
-        public SoloSpectatorPlayer(Score score, PlayerConfiguration configuration = null)
-            : base(score, configuration)
+        protected override UserActivity InitialActivity => new UserActivity.SpectatingUser(Score.ScoreInfo);
+
+        public SoloSpectatorPlayer(Score score)
+            : base(score, new PlayerConfiguration { AllowUserInteraction = false })
         {
             this.score = score;
         }
@@ -24,11 +28,11 @@ namespace osu.Game.Screens.Play
             SpectatorClient.OnUserBeganPlaying += userBeganPlaying;
         }
 
-        public override bool OnExiting(IScreen next)
+        public override bool OnExiting(ScreenExitEvent e)
         {
             SpectatorClient.OnUserBeganPlaying -= userBeganPlaying;
 
-            return base.OnExiting(next);
+            return base.OnExiting(e);
         }
 
         private void userBeganPlaying(int userId, SpectatorState state)
@@ -45,7 +49,7 @@ namespace osu.Game.Screens.Play
         {
             base.Dispose(isDisposing);
 
-            if (SpectatorClient != null)
+            if (SpectatorClient.IsNotNull())
                 SpectatorClient.OnUserBeganPlaying -= userBeganPlaying;
         }
     }

@@ -2,6 +2,7 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
@@ -16,12 +17,12 @@ using osu.Game.Screens.OnlinePlay.Match;
 
 namespace osu.Game.Screens.OnlinePlay.Playlists
 {
-    public class PlaylistsLoungeSubScreen : LoungeSubScreen
+    public partial class PlaylistsLoungeSubScreen : LoungeSubScreen
     {
         [Resolved]
-        private IAPIProvider api { get; set; }
+        private IAPIProvider api { get; set; } = null!;
 
-        private Dropdown<PlaylistsCategory> categoryDropdown;
+        private Dropdown<PlaylistsCategory> categoryDropdown = null!;
 
         protected override IEnumerable<Drawable> CreateFilterControls()
         {
@@ -49,6 +50,10 @@ namespace osu.Game.Screens.OnlinePlay.Playlists
                 case PlaylistsCategory.Spotlight:
                     criteria.Category = @"spotlight";
                     break;
+
+                case PlaylistsCategory.FeaturedArtist:
+                    criteria.Category = @"featured_artist";
+                    break;
             }
 
             return criteria;
@@ -60,8 +65,8 @@ namespace osu.Game.Screens.OnlinePlay.Playlists
         {
             return new Room
             {
-                Name = { Value = $"{api.LocalUser}'s awesome playlist" },
-                Type = { Value = MatchType.Playlists }
+                Name = $"{api.LocalUser}'s awesome playlist",
+                Type = MatchType.Playlists
             };
         }
 
@@ -73,7 +78,10 @@ namespace osu.Game.Screens.OnlinePlay.Playlists
         {
             Any,
             Normal,
-            Spotlight
+            Spotlight,
+
+            [Description("Featured Artist")]
+            FeaturedArtist,
         }
     }
 }

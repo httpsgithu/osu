@@ -1,25 +1,39 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using System;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using NUnit.Framework;
+using osu.Framework.Graphics.Containers;
 using osu.Framework.Screens;
+using osu.Framework.Testing;
 using osu.Game.Beatmaps;
 using osu.Game.Online.API;
 using osu.Game.Online.Rooms;
 using osu.Game.Online.Solo;
 using osu.Game.Rulesets;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Mania;
+using osu.Game.Rulesets.Mods;
 using osu.Game.Rulesets.Objects;
 using osu.Game.Rulesets.Osu;
 using osu.Game.Rulesets.Osu.Judgements;
 using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.Taiko;
+using osu.Game.Rulesets.Taiko.Mods;
+using osu.Game.Scoring;
+using osu.Game.Screens.Play;
 using osu.Game.Screens.Ranking;
 using osu.Game.Tests.Beatmaps;
+using osuTK.Input;
 
 namespace osu.Game.Tests.Visual.Gameplay
 {
-    public class TestScenePlayerScoreSubmission : PlayerTestScene
+    public partial class TestScenePlayerScoreSubmission : PlayerTestScene
     {
         protected override bool AllowFail => allowFail;
 
@@ -27,12 +41,21 @@ namespace osu.Game.Tests.Visual.Gameplay
 
         private Func<RulesetInfo, IBeatmap> createCustomBeatmap;
         private Func<Ruleset> createCustomRuleset;
+        private Func<Mod[]> createCustomMods;
 
         private DummyAPIAccess dummyAPI => (DummyAPIAccess)API;
 
         protected override bool HasCustomSteps => true;
 
-        protected override TestPlayer CreatePlayer(Ruleset ruleset) => new TestPlayer(false);
+        protected override TestPlayer CreatePlayer(Ruleset ruleset)
+        {
+            if (createCustomMods != null)
+                SelectedMods.Value = SelectedMods.Value.Concat(createCustomMods()).ToList();
+
+            return new FakeImportingPlayer(false);
+        }
+
+        protected new FakeImportingPlayer Player => (FakeImportingPlayer)base.Player;
 
         protected override Ruleset CreatePlayerRuleset() => createCustomRuleset?.Invoke() ?? new OsuRuleset();
 
@@ -50,7 +73,7 @@ namespace osu.Game.Tests.Visual.Gameplay
         [Test]
         public void TestNoSubmissionOnResultsWithNoToken()
         {
-            prepareTokenResponse(false);
+            prepareTestAPI(false);
 
             createPlayerTest();
 
@@ -70,7 +93,7 @@ namespace osu.Game.Tests.Visual.Gameplay
         [Test]
         public void TestSubmissionOnResults()
         {
-            prepareTokenResponse(true);
+            prepareTestAPI(true);
 
             createPlayerTest();
 
@@ -87,9 +110,49 @@ namespace osu.Game.Tests.Visual.Gameplay
         }
 
         [Test]
+        public void TestSubmissionForDifferentRuleset()
+        {
+            prepareTestAPI(true);
+
+            createPlayerTest(createRuleset: () => new TaikoRuleset());
+
+            AddUntilStep("wait for token request", () => Player.TokenCreationRequested);
+
+            AddUntilStep("wait for track to start running", () => Beatmap.Value.Track.IsRunning);
+
+            addFakeHit();
+
+            AddStep("seek to completion", () => Player.GameplayClockContainer.Seek(Player.DrawableRuleset.Objects.Last().GetEndTime()));
+
+            AddUntilStep("results displayed", () => Player.GetChildScreen() is ResultsScreen);
+            AddAssert("ensure passing submission", () => Player.SubmittedScore?.ScoreInfo.Passed == true);
+            AddAssert("submitted score has correct ruleset ID", () => Player.SubmittedScore?.ScoreInfo.Ruleset.ShortName == new TaikoRuleset().RulesetInfo.ShortName);
+        }
+
+        [Test]
+        public void TestSubmissionForConvertedBeatmap()
+        {
+            prepareTestAPI(true);
+
+            createPlayerTest(createRuleset: () => new ManiaRuleset(), createBeatmap: _ => createTestBeatmap(new OsuRuleset().RulesetInfo));
+
+            AddUntilStep("wait for token request", () => Player.TokenCreationRequested);
+
+            AddUntilStep("wait for track to start running", () => Beatmap.Value.Track.IsRunning);
+
+            addFakeHit();
+
+            AddStep("seek to completion", () => Player.GameplayClockContainer.Seek(Player.DrawableRuleset.Objects.Last().GetEndTime()));
+
+            AddUntilStep("results displayed", () => Player.GetChildScreen() is ResultsScreen);
+            AddAssert("ensure passing submission", () => Player.SubmittedScore?.ScoreInfo.Passed == true);
+            AddAssert("submitted score has correct ruleset ID", () => Player.SubmittedScore?.ScoreInfo.Ruleset.ShortName == new ManiaRuleset().RulesetInfo.ShortName);
+        }
+
+        [Test]
         public void TestNoSubmissionOnExitWithNoToken()
         {
-            prepareTokenResponse(false);
+            prepareTestAPI(false);
 
             createPlayerTest();
 
@@ -106,22 +169,46 @@ namespace osu.Game.Tests.Visual.Gameplay
         [Test]
         public void TestNoSubmissionOnEmptyFail()
         {
-            prepareTokenResponse(true);
+            prepareTestAPI(true);
 
             createPlayerTest(true);
 
             AddUntilStep("wait for token request", () => Player.TokenCreationRequested);
 
-            AddUntilStep("wait for fail", () => Player.HasFailed);
+            AddUntilStep("wait for fail", () => Player.GameplayState.HasFailed);
             AddStep("exit", () => Player.Exit());
 
             AddAssert("ensure no submission", () => Player.SubmittedScore == null);
         }
 
         [Test]
+        public void TestEmptyFailStillImports()
+        {
+            prepareTestAPI(true);
+
+            createPlayerTest(true);
+
+            AddUntilStep("wait for token request", () => Player.TokenCreationRequested);
+
+            AddUntilStep("wait for fail", () => Player.GameplayState.HasFailed);
+            AddUntilStep("wait for fail overlay", () => Player.FailOverlay.State.Value, () => Is.EqualTo(Visibility.Visible));
+
+            AddStep("attempt import", () =>
+            {
+                InputManager.MoveMouseTo(Player.ChildrenOfType<SaveFailedScoreButton>().Single());
+                InputManager.Click(MouseButton.Left);
+            });
+            AddUntilStep("wait for import to start", () => Player.ScoreImportStarted);
+            AddStep("allow import", () => Player.AllowImportCompletion.Release());
+
+            AddUntilStep("import completed", () => Player.ImportedScore, () => Is.Not.Null);
+            AddAssert("ensure no submission", () => Player.SubmittedScore, () => Is.Null);
+        }
+
+        [Test]
         public void TestSubmissionOnFail()
         {
-            prepareTokenResponse(true);
+            prepareTestAPI(true);
 
             createPlayerTest(true);
 
@@ -129,20 +216,45 @@ namespace osu.Game.Tests.Visual.Gameplay
 
             addFakeHit();
 
-            AddUntilStep("wait for fail", () => Player.HasFailed);
-            AddStep("exit", () => Player.Exit());
+            AddUntilStep("wait for fail", () => Player.GameplayState.HasFailed);
 
-            AddAssert("ensure failing submission", () => Player.SubmittedScore?.ScoreInfo.Passed == false);
+            AddUntilStep("wait for submission", () => Player.SubmittedScore != null);
+            AddAssert("ensure failing submission", () => Player.SubmittedScore.ScoreInfo.Passed == false);
         }
 
         [Test]
         public void TestNoSubmissionOnEmptyExit()
         {
-            prepareTokenResponse(true);
+            prepareTestAPI(true);
 
             createPlayerTest();
 
             AddUntilStep("wait for token request", () => Player.TokenCreationRequested);
+
+            AddStep("exit", () => Player.Exit());
+            AddAssert("ensure no submission", () => Player.SubmittedScore == null);
+        }
+
+        [Test]
+        public void TestNoSubmissionWhenScoreZero()
+        {
+            prepareTestAPI(true);
+
+            createPlayerTest();
+
+            AddUntilStep("wait for token request", () => Player.TokenCreationRequested);
+
+            AddUntilStep("wait for track to start running", () => Beatmap.Value.Track.IsRunning);
+            AddUntilStep("wait for first result", () => Player.Results.Count > 0);
+
+            AddStep("add fake non-scoring hit", () =>
+            {
+                Player.ScoreProcessor.RevertResult(Player.Results.First());
+                Player.ScoreProcessor.ApplyResult(new OsuJudgementResult(Beatmap.Value.Beatmap.HitObjects.First(), new IgnoreJudgement())
+                {
+                    Type = HitResult.IgnoreHit,
+                });
+            });
 
             AddStep("exit", () => Player.Exit());
             AddAssert("ensure no submission", () => Player.SubmittedScore == null);
@@ -151,7 +263,7 @@ namespace osu.Game.Tests.Visual.Gameplay
         [Test]
         public void TestSubmissionOnExit()
         {
-            prepareTokenResponse(true);
+            prepareTestAPI(true);
 
             createPlayerTest();
 
@@ -160,18 +272,39 @@ namespace osu.Game.Tests.Visual.Gameplay
             addFakeHit();
 
             AddStep("exit", () => Player.Exit());
-            AddAssert("ensure failing submission", () => Player.SubmittedScore?.ScoreInfo.Passed == false);
+
+            AddUntilStep("wait for submission", () => Player.SubmittedScore != null);
+            AddAssert("ensure failing submission", () => Player.SubmittedScore.ScoreInfo.Passed == false);
+        }
+
+        [Test]
+        public void TestSubmissionOnExitDuringImport()
+        {
+            prepareTestAPI(true);
+
+            createPlayerTest();
+            AddStep("block imports", () => Player.AllowImportCompletion.Wait());
+
+            AddUntilStep("wait for token request", () => Player.TokenCreationRequested);
+
+            addFakeHit();
+
+            AddUntilStep("wait for import to start", () => Player.ScoreImportStarted);
+
+            AddStep("exit", () => Player.Exit());
+            AddStep("allow import to proceed", () => Player.AllowImportCompletion.Release(1));
+            AddUntilStep("ensure submission", () => Player.SubmittedScore != null && Player.ImportedScore != null);
         }
 
         [Test]
         public void TestNoSubmissionOnLocalBeatmap()
         {
-            prepareTokenResponse(true);
+            prepareTestAPI(true);
 
             createPlayerTest(false, r =>
             {
                 var beatmap = createTestBeatmap(r);
-                beatmap.BeatmapInfo.OnlineBeatmapID = null;
+                beatmap.BeatmapInfo.ResetOnlineInfo();
                 return beatmap;
             });
 
@@ -183,12 +316,21 @@ namespace osu.Game.Tests.Visual.Gameplay
             AddAssert("ensure no submission", () => Player.SubmittedScore == null);
         }
 
-        [Test]
-        public void TestNoSubmissionOnCustomRuleset()
+        [TestCase(null)]
+        [TestCase(10)]
+        public void TestNoSubmissionOnCustomRuleset(int? rulesetId)
         {
-            prepareTokenResponse(true);
+            prepareTestAPI(true);
 
-            createPlayerTest(false, createRuleset: () => new OsuRuleset { RulesetInfo = { ID = 10 } });
+            createPlayerTest(createRuleset: () => new OsuRuleset
+            {
+                RulesetInfo =
+                {
+                    Name = "custom",
+                    ShortName = $"custom{rulesetId}",
+                    OnlineID = rulesetId ?? -1
+                }
+            });
 
             AddUntilStep("wait for token request", () => Player.TokenCreationRequested);
 
@@ -198,17 +340,32 @@ namespace osu.Game.Tests.Visual.Gameplay
             AddAssert("ensure no submission", () => Player.SubmittedScore == null);
         }
 
-        private void createPlayerTest(bool allowFail = false, Func<RulesetInfo, IBeatmap> createBeatmap = null, Func<Ruleset> createRuleset = null)
+        [Test]
+        public void TestNoSubmissionWithModsOfDifferentRuleset()
+        {
+            prepareTestAPI(true);
+
+            createPlayerTest(createRuleset: () => new OsuRuleset(), createMods: () => new Mod[] { new TaikoModHidden() });
+
+            AddUntilStep("wait for token request", () => Player.TokenCreationRequested);
+            AddAssert("gameplay not loaded", () => Player.DrawableRuleset == null);
+
+            AddStep("exit", () => Player.Exit());
+            AddAssert("ensure no submission", () => Player.SubmittedScore == null);
+        }
+
+        private void createPlayerTest(bool allowFail = false, Func<RulesetInfo, IBeatmap> createBeatmap = null, Func<Ruleset> createRuleset = null, Func<Mod[]> createMods = null)
         {
             CreateTest(() => AddStep("set up requirements", () =>
             {
                 this.allowFail = allowFail;
                 createCustomBeatmap = createBeatmap;
                 createCustomRuleset = createRuleset;
+                createCustomMods = createMods;
             }));
         }
 
-        private void prepareTokenResponse(bool validToken)
+        private void prepareTestAPI(bool validToken)
         {
             AddStep("Prepare test API", () =>
             {
@@ -222,6 +379,31 @@ namespace osu.Game.Tests.Visual.Gameplay
                             else
                                 tokenRequest.TriggerFailure(new APIException("something went wrong!", null));
                             return true;
+
+                        case SubmitSoloScoreRequest submissionRequest:
+                            if (validToken)
+                            {
+                                var requestScore = submissionRequest.Score;
+
+                                submissionRequest.TriggerSuccess(new MultiplayerScore
+                                {
+                                    ID = 1234,
+                                    User = dummyAPI.LocalUser.Value,
+                                    Rank = requestScore.Rank,
+                                    TotalScore = requestScore.TotalScore,
+                                    Accuracy = requestScore.Accuracy,
+                                    MaxCombo = requestScore.MaxCombo,
+                                    Mods = requestScore.Mods,
+                                    Statistics = requestScore.Statistics,
+                                    Passed = requestScore.Passed,
+                                    EndedAt = DateTimeOffset.Now,
+                                    Position = 1
+                                });
+
+                                return true;
+                            }
+
+                            break;
                     }
 
                     return false;
@@ -241,6 +423,39 @@ namespace osu.Game.Tests.Visual.Gameplay
                     Type = HitResult.Great,
                 });
             });
+        }
+
+        protected partial class FakeImportingPlayer : TestPlayer
+        {
+            public bool ScoreImportStarted { get; set; }
+            public SemaphoreSlim AllowImportCompletion { get; }
+            public Score ImportedScore { get; private set; }
+
+            public new FailOverlay FailOverlay => base.FailOverlay;
+
+            public FakeImportingPlayer(bool allowPause = true, bool showResults = true, bool pauseOnFocusLost = false)
+                : base(allowPause, showResults, pauseOnFocusLost)
+            {
+                AllowImportCompletion = new SemaphoreSlim(1);
+            }
+
+            protected override GameplayClockContainer CreateGameplayClockContainer(WorkingBeatmap beatmap, double gameplayStart) => new MasterGameplayClockContainer(beatmap, gameplayStart)
+            {
+                ShouldValidatePlaybackRate = false,
+            };
+
+            protected override async Task ImportScore(Score score)
+            {
+                ScoreImportStarted = true;
+
+                await AllowImportCompletion.WaitAsync().ConfigureAwait(false);
+
+                ImportedScore = score;
+
+                // Calling base.ImportScore is omitted as it will fail for the test method which uses a custom ruleset.
+                // This can be resolved by doing something similar to what TestScenePlayerLocalScoreImport is doing,
+                // but requires a bit of restructuring.
+            }
         }
     }
 }
